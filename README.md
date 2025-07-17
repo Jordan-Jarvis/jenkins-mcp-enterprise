@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/jordan-jarvis-jenkins-mcp-enterprise-badge.png)](https://mseep.ai/app/jordan-jarvis-jenkins-mcp-enterprise)
+
 # Jenkins MCP Server Enterprise
 
 > Jenkins MCP server for multi-instance routing, build diagnostics, and optional vector search.
