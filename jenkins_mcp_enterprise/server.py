@@ -42,8 +42,21 @@ def create_server(config=None, config_file_path=None) -> FastMCP:
     tool_factory = ToolFactory(container)
     tools = tool_factory.create_tools()
 
-    # Create FastMCP server
-    mcp = FastMCP("Jenkins MCP Server", version="1.0.0")
+    # Create FastMCP server with settings for HTTP transport
+    mcp = FastMCP("Jenkins MCP Server")
+    
+    # Configure host/port for HTTP transports via settings
+    import os
+    if os.environ.get('UVICORN_HOST'):
+        mcp.settings.host = os.environ.get('UVICORN_HOST', '0.0.0.0')
+    if os.environ.get('UVICORN_PORT'):
+        mcp.settings.port = int(os.environ.get('UVICORN_PORT', 8000))
+    
+    # Add health check endpoint for Docker health checks
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health_check(request):
+        from starlette.responses import PlainTextResponse
+        return PlainTextResponse("OK")
 
     # Get multi-Jenkins manager for roots support
     multi_jenkins_manager = container.get_multi_jenkins_manager()
@@ -326,11 +339,7 @@ def main():
                 f"Starting Jenkins MCP Server (FastMCP) on {args.host}:{args.port} with {args.transport} transport...",
                 file=sys.stderr,
             )
-            # For HTTP transports, we need to set up the port
-            import os
-
-            os.environ["UVICORN_HOST"] = args.host
-            os.environ["UVICORN_PORT"] = str(args.port)
+            # Host/port will be passed directly to mcp.run()
         else:
             print(
                 "Starting Jenkins MCP Server (FastMCP) with stdio transport...",
@@ -338,7 +347,15 @@ def main():
             )
 
         sys.stderr.flush()
-        server.run(transport=args.transport, mount_path=args.mount_path)
+        
+        # Set environment variables for HTTP transports (FastMCP reads these)
+        if args.transport in ["sse", "streamable-http"]:
+            import os
+            os.environ["UVICORN_HOST"] = args.host
+            os.environ["UVICORN_PORT"] = str(args.port)
+            server.run(transport=args.transport, mount_path=args.mount_path)
+        else:
+            server.run(transport=args.transport, mount_path=args.mount_path)
     except KeyboardInterrupt:
         print(
             "\nJenkins MCP Server shutting down due to KeyboardInterrupt...",

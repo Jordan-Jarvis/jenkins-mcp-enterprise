@@ -1,13 +1,14 @@
 {
   "mcpServers": {
-    "jenkins_mcp_enterprise": {
-      "command": "python3",
+    "jenkins-mcp": {
+      "command": "jenkins_mcp_enterprise",
       "args": [
-        "-m", 
-        "jenkins_mcp_enterprise.server",
+        "--transport",
+        "stdio",
         "--config",
-        "jenkins_mcp_enterprise/config/mcp-config.yml"
-      ]
+        "/Users/JordanJarvis/Documents/ai/jenkins-mcp/config/mcp-config.yml"
+      ],
+      "timeout": 300
     }
   }
 }

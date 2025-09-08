@@ -75,7 +75,7 @@ class QdrantVectorManager:
         # Collection naming
         self.collection_name = config.collection_name
 
-        # Initialize collection
+        # Initialize collection with proper retry
         self._ensure_collection_exists()
 
     def _extract_host(self, host_url: str) -> str:
@@ -100,6 +100,10 @@ class QdrantVectorManager:
             return
 
         try:
+            # Wait briefly for Qdrant to be fully ready (Docker timing issue)
+            import time
+            time.sleep(2)
+            
             # Check if collection exists
             collections = self.client.get_collections()
             collection_names = [col.name for col in collections.collections]
@@ -121,7 +125,32 @@ class QdrantVectorManager:
             logger.info(f"Qdrant collection '{self.collection_name}' is ready")
 
         except Exception as e:
-            raise VectorStoreError(f"Failed to initialize Qdrant collection: {e}")
+            # Retry connection with exponential backoff
+            import time
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                    logger.info(f"Retrying Qdrant connection (attempt {attempt + 1}/{max_retries})")
+                    collections = self.client.get_collections()
+                    collection_names = [col.name for col in collections.collections]
+                    
+                    if self.collection_name not in collection_names:
+                        self.client.create_collection(
+                            collection_name=self.collection_name,
+                            vectors_config=VectorParams(
+                                size=self.embedding_dim, distance=Distance.COSINE
+                            ),
+                        )
+                        self._create_indexes()
+                    
+                    logger.info(f"Qdrant collection '{self.collection_name}' initialized successfully")
+                    return
+                    
+                except Exception as retry_e:
+                    logger.warning(f"Retry {attempt + 1} failed: {retry_e}")
+                    if attempt == max_retries - 1:
+                        raise VectorStoreError(f"Failed to initialize Qdrant after {max_retries} attempts: {e}")
 
     def _create_indexes(self) -> None:
         """Create indexes for efficient metadata filtering"""

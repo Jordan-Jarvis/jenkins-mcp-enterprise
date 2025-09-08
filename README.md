@@ -57,13 +57,13 @@ pip install jenkins_mcp_enterprise
 
 # 2. Create configuration file
 mkdir -p config
-curl -o config/mcp-config.yml https://raw.githubusercontent.com/Jordan-Jarvis/jenkins_mcp_enterprise/main/config/mcp-config.example.yml
+cp config/mcp-config.example.yml config/mcp-config.yml
 ```
 
 **Option 2: Install from Source**
 ```bash
 # 1. Clone and install
-git clone https://github.com/Jordan-Jarvis/jenkins_mcp_enterprise-enterprise
+git clone https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise
 cd jenkins-mcp
 python3 -m pip install -e .
 
@@ -407,7 +407,7 @@ We welcome contributions! This project uses:
 
 ```bash
 # Development setup
-git clone https://github.com/Jordan-Jarvis/jenkins_mcp_enterprise-enterprise
+git clone https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise
 cd jenkins-mcp
 python3 -m pip install -e .
 ./scripts/start_dev_environment.sh
@@ -447,7 +447,7 @@ GPL v3 License - build amazing things with Jenkins and AI!
 
 **🚀 Transform your Jenkins debugging experience today!**
 
-[⭐ Star this repo](https://github.com/Jordan-Jarvis/jenkins_mcp_enterprise) • [📖 Read the docs](docs/) • [🐛 Report issues](https://github.com/Jordan-Jarvis/jenkins_mcp_enterprise/issues) • [💬 Join discussions](https://github.com/Jordan-Jarvis/jenkins_mcp_enterprise/discussions) • [☕ Buy me a coffee](https://buymeacoffee.com/jordanmjaro)
+[⭐ Star this repo](https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise) • [📖 Read the docs](docs/) • [🐛 Report issues](https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise/issues) • [💬 Join discussions](https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise/discussions) • [☕ Buy me a coffee](https://buymeacoffee.com/jordanmjaro)
 
 *Built with ❤️ for DevOps teams who demand more from their CI/CD tooling*
 

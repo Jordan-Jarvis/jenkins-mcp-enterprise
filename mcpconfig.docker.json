@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "jenkins-mcp": {
+      "command": "python3",
+      "args": ["-m", "jenkins_mcp_enterprise.server", "--transport", "stdio", "--config", "/app/config/mcp-config.yml"],
+      "env": {
+        "QDRANT_HOST": "http://qdrant:6333",
+        "CACHE_DIR": "/tmp/mcp-jenkins",
+        "LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}

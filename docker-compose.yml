@@ -1,144 +1,58 @@
 services:
-  # Vector database for semantic search
+  # Qdrant Vector Database
   qdrant:
     image: qdrant/qdrant:latest
     container_name: jenkins_mcp_enterprise-qdrant
     ports:
-      - "6335:6333"  # HTTP API (changed to avoid conflict)
-      - "6336:6334"  # gRPC API (changed to avoid conflict)
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
-      QDRANT__SERVICE__HTTP_PORT: 6333
-      QDRANT__SERVICE__GRPC_PORT: 6334
-    restart: unless-stopped
+      - QDRANT__LOG_LEVEL=INFO
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "timeout 5s bash -c '</dev/tcp/localhost/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
       retries: 3
-    networks:
-      - mcp-net
+      start_period: 10s
+    restart: unless-stopped
 
-  # Jenkins MCP Enterprise Server (Production)
+  # Jenkins MCP Enterprise Server (HTTP mode - no proxy needed)
   jenkins_mcp_enterprise-server:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: jenkins_mcp_enterprise-server
-    environment:
-      # Jenkins Configuration (Required)
-      - JENKINS_URL=${JENKINS_URL:-https://your-jenkins-instance.com}
-      - JENKINS_USER=${JENKINS_USER:-your.username@domain.com}
-      - JENKINS_TOKEN=${JENKINS_TOKEN}
-      
-      # Vector Search Configuration
-      - QDRANT_HOST=http://qdrant:6333
-      - DISABLE_VECTOR_SEARCH=${DISABLE_VECTOR_SEARCH:-false}
-      
-      # Cache Configuration
-      - CACHE_DIR=/app/cache
-      - CACHE_MAX_SIZE_MB=${CACHE_MAX_SIZE_MB:-1000}
-      - CACHE_RETENTION_DAYS=${CACHE_RETENTION_DAYS:-7}
-      
-      # Logging Configuration
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FILE=/app/logs/jenkins_mcp_enterprise.log
-      
-      # MCP Server Configuration
-      - MCP_TRANSPORT=stdio
-    volumes:
-      - jenkins_cache:/app/cache
-      - jenkins_logs:/app/logs
     depends_on:
       qdrant:
         condition: service_healthy
-    restart: unless-stopped
-    stdin_open: true      # Required for MCP stdio transport
-    tty: true            # Required for MCP stdio transport
-    networks:
-      - mcp-net
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import jenkins_mcp_enterprise.server; print('Server importable')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # HTTP Proxy for MCP Enterprise Server (Optional - for HTTP transport)
-  jenkins_mcp_enterprise-proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile.proxy
-    container_name: jenkins_mcp_enterprise-proxy
     ports:
-      - "8080:8080"
+      - "3008:8000"
     environment:
-      - jenkins_mcp_enterprise_HOST=jenkins_mcp_enterprise-server
-      - PROXY_PORT=8080
-    depends_on:
-      - jenkins_mcp_enterprise-server
-    restart: unless-stopped
-    networks:
-      - mcp-net
-    profiles:
-      - http-proxy  # Only start with --profile http-proxy
-
-  # HTTP Streaming Server (Native HTTP transport)
-  jenkins_mcp_enterprise-http:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: jenkins_mcp_enterprise-http
-    ports:
-      - "8000:8000"
-    environment:
-      # Jenkins Configuration (Required)
-      - JENKINS_URL=${JENKINS_URL:-https://your-jenkins-instance.com}
-      - JENKINS_USER=${JENKINS_USER:-your.username@domain.com}
-      - JENKINS_TOKEN=${JENKINS_TOKEN}
-      
-      # Vector Search Configuration
       - QDRANT_HOST=http://qdrant:6333
-      - DISABLE_VECTOR_SEARCH=${DISABLE_VECTOR_SEARCH:-false}
-      
-      # Cache Configuration
-      - CACHE_DIR=/app/cache
-      - CACHE_MAX_SIZE_MB=${CACHE_MAX_SIZE_MB:-1000}
-      - CACHE_RETENTION_DAYS=${CACHE_RETENTION_DAYS:-7}
-      
-      # Logging Configuration
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - LOG_FILE=/app/logs/jenkins_mcp_enterprise.log
-      
-      # MCP Server Configuration - HTTP Streaming
-      - MCP_TRANSPORT=streamable-http
-      - MCP_PORT=8000
-      - MCP_HOST=0.0.0.0
+      - CACHE_DIR=/tmp/mcp-jenkins
+      - LOG_LEVEL=INFO
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=8000
+      - DISABLE_VECTOR_SEARCH=false  # Enable vector search with Qdrant
     volumes:
-      - jenkins_cache:/app/cache
-      - jenkins_logs:/app/logs
-    depends_on:
-      qdrant:
-        condition: service_healthy
+      - jenkins_mcp_enterprise_cache:/tmp/mcp-jenkins
+      - ./config:/app/config:ro
     restart: unless-stopped
-    networks:
-      - mcp-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    profiles:
-      - http-streaming  # Only start with --profile http-streaming
+      start_period: 30s
 
 volumes:
   qdrant_data:
     driver: local
-  jenkins_cache:
-    driver: local
-  jenkins_logs:
+  jenkins_mcp_enterprise_cache:
     driver: local
 
 networks:
-  mcp-net:
-    driver: bridge
+  default:
+    name: jenkins_mcp_enterprise-network
