@@ -63,7 +63,9 @@ class TestSimpleValidation:
         assert success, "Tool validation with real Jenkins should succeed"
 
     @pytest.mark.asyncio
-    async def test_jenkins_mcp_enterprise_startup_without_vector_db(self, simple_jenkins):
+    async def test_jenkins_mcp_enterprise_startup_without_vector_db(
+        self, simple_jenkins
+    ):
         """Test MCP server startup with minimal configuration (no vector DB)"""
         cache_dir = tempfile.mkdtemp(prefix="test-mcp-simple-")
 

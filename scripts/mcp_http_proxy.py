@@ -47,7 +47,9 @@ class MCPStdioProxy:
                 text=True,
                 bufsize=0,
             )
-            logger.info(f"Started MCP server: {' '.join(self.jenkins_mcp_enterprise_command)}")
+            logger.info(
+                f"Started MCP server: {' '.join(self.jenkins_mcp_enterprise_command)}"
+            )
         except Exception as e:
             logger.error(f"Failed to start MCP server: {e}")
             raise
@@ -102,7 +104,9 @@ class MCPStdioProxy:
 
 
 # Initialize proxy
-jenkins_mcp_enterprise_host = os.getenv("jenkins_mcp_enterprise_HOST", "jenkins_mcp_enterprise-server")
+jenkins_mcp_enterprise_host = os.getenv(
+    "jenkins_mcp_enterprise_HOST", "jenkins_mcp_enterprise-server"
+)
 mcp_command = [
     "docker",
     "exec",

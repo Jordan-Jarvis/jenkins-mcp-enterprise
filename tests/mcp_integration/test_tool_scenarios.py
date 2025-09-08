@@ -261,7 +261,9 @@ class TestToolScenarios:
     @pytest.mark.skip(reason="Requires real Jenkins instance")
     async def test_real_jenkins_connection(self, real_jenkins_config):
         """Test connection to real Jenkins instance"""
-        async with MCPTestClient("jenkins_mcp_enterprise.server", real_jenkins_config) as client:
+        async with MCPTestClient(
+            "jenkins_mcp_enterprise.server", real_jenkins_config
+        ) as client:
             # Test listing tools
             tools = await client.list_tools()
             assert len(tools) > 0

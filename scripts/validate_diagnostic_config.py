@@ -196,7 +196,10 @@ def find_config_files() -> List[Path]:
 
     # Default bundled
     bundled_config = (
-        project_root / "jenkins_mcp_enterprise" / "diagnostic_config" / "diagnostic-parameters.yml"
+        project_root
+        / "jenkins_mcp_enterprise"
+        / "diagnostic_config"
+        / "diagnostic-parameters.yml"
     )
     if bundled_config.exists():
         config_files.append(bundled_config)

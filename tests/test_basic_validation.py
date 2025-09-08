@@ -33,7 +33,11 @@ class TestBasicValidation:
     def test_config_module_imports(self):
         """Test that config module imports work"""
         try:
-            from jenkins_mcp_enterprise.config import JenkinsConfig, ServerConfig, VectorConfig
+            from jenkins_mcp_enterprise.config import (
+                JenkinsConfig,
+                ServerConfig,
+                VectorConfig,
+            )
 
             assert JenkinsConfig is not None
             assert VectorConfig is not None

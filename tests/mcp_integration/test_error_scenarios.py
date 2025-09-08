@@ -345,7 +345,9 @@ class TestErrorScenarios:
         }
 
         try:
-            async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+            async with MCPTestClient(
+                "jenkins_mcp_enterprise/server.py", config
+            ) as client:
                 # Try to call any tool - server might not even start properly
                 result = await client.call_tool(
                     "trigger_build_async", {"job_name": "any-job"}

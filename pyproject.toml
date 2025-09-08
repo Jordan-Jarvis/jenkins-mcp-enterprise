@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jenkins_mcp_enterprise"
-version = "1.0.0"
+version = "1.0.1"
 description = "MCP server for Jenkins integration with AI assistants, providing build management, log analysis, and failure diagnostics."
 readme = "README.md"
 license = {file = "LICENSE"}

@@ -1,4 +1,4 @@
-# 🚀 Jenkins MCP Server Pro
+# 🚀 Jenkins MCP Server Enterprise
 
 > **The most advanced Jenkins MCP server available** - Built for enterprise debugging, multi-instance management, and AI-powered failure analysis.
 
