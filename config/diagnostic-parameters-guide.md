@@ -192,6 +192,177 @@ failure_patterns:
   max_pattern_preview: 300
 ```
 
+## Advanced Regex Pattern Configuration
+
+The system supports sophisticated regex patterns with capture groups for automated data extraction and dynamic message generation.
+
+### Regex Pattern Structure
+
+```yaml
+recommendations:
+  patterns:
+    pattern_name:
+      conditions:
+        - type: "regex"
+          pattern: "regular_expression_with_(?P<name>groups)"
+          message_template: "Template with {name} placeholders"
+          flags: 2  # Optional: regex flags
+      message: "Fallback message when interpolation fails"
+```
+
+### Capture Group Types
+
+#### Named Capture Groups
+Use Python's named group syntax for clear data extraction:
+
+```yaml
+timestamp_extraction:
+  conditions:
+    - type: "regex"
+      pattern: "\\[(?P<date>\\d{4}-\\d{2}-\\d{2})\\s+(?P<time>\\d{2}:\\d{2}:\\d{2})\\]"
+      message_template: "🕐 **Timestamp**: {date} at {time}"
+  message: "Timestamp information detected"
+```
+
+#### Numbered Capture Groups
+For simpler patterns, use numbered groups:
+
+```yaml
+error_codes:
+  conditions:
+    - type: "regex"
+      pattern: "EXIT_CODE\\s+(\\d+)\\s+(.+)"
+      message_template: "🚨 **Exit Code {group_1}**: {group_2}"
+  message: "Exit code information"
+```
+
+### Message Template Interpolation
+
+Templates support Python string formatting with captured group names:
+
+- **Named Groups**: `{group_name}` using the exact name from `(?P<group_name>...)`
+- **Numbered Groups**: `{group_1}`, `{group_2}`, etc. for unnamed groups
+- **Fallback**: If interpolation fails, uses the main `message` field
+
+### Regex Flags
+
+Common regex flags (combine with bitwise OR):
+
+```yaml
+conditions:
+  - type: "regex"
+    pattern: "case_sensitive_pattern"
+    flags: 0          # No flags
+    
+  - type: "regex"
+    pattern: "case_insensitive"
+    flags: 2          # re.IGNORECASE
+    
+  - type: "regex" 
+    pattern: "multiline.*pattern"
+    flags: 10         # re.IGNORECASE | re.MULTILINE (2 + 8)
+```
+
+### Performance Considerations
+
+- **Compiled Patterns**: Regex patterns are compiled once and cached for performance
+- **Error Handling**: Invalid patterns are logged but don't break the system
+- **Timeout Protection**: Complex patterns are protected by processing limits
+- **Memory Efficient**: Only successful matches store captured groups
+
+### Example: Comprehensive Build Analysis
+
+```yaml
+recommendations:
+  patterns:
+    # Extract build version and duration
+    build_info:
+      conditions:
+        - type: "regex"
+          pattern: "Build\\s+(?P<version>\\d+\\.\\d+\\.\\d+).*?completed in (?P<duration>\\d+)m(?P<seconds>\\d+)s"
+          message_template: "🏗️ **Build {version}**: Completed in {duration}m{seconds}s"
+      message: "Build information extracted"
+    
+    # Parse error messages with severity
+    error_categorization:
+      conditions:
+        - type: "regex"
+          pattern: "\\[(?P<severity>ERROR|WARN|INFO)\\].*?(?P<component>[A-Za-z0-9_]+):\\s*(?P<message>[^\\n]+)"
+          message_template: "{severity} in {component}: {message}"
+      message: "Error categorization with details"
+    
+    # Extract test results
+    test_summary:
+      conditions:
+        - type: "regex"
+          pattern: "Tests run:\\s*(?P<total>\\d+),\\s*Failures:\\s*(?P<failures>\\d+),\\s*Errors:\\s*(?P<errors>\\d+)"
+          message_template: "🧪 **Test Results**: {total} total, {failures} failures, {errors} errors"
+      message: "Test execution summary"
+    
+    # Database connection details
+    db_connection:
+      conditions:
+        - type: "regex"
+          pattern: "Connected to (?P<db_type>\\w+) at (?P<host>[^:]+):(?P<port>\\d+)/(?P<database>\\w+)"
+          message_template: "🗄️ **Database**: {db_type} at {host}:{port}/{database}"
+      message: "Database connection established"
+```
+
+### Migration from Simple Patterns
+
+Converting existing simple patterns to regex patterns:
+
+```yaml
+# Before: Simple string matching
+old_pattern:
+  conditions:
+    - "build failed"
+  message: "Build failure detected"
+
+# After: Regex with data extraction
+new_pattern:
+  conditions:
+    - type: "regex"
+      pattern: "build\\s+(?P<phase>\\w+)\\s+failed.*?error:\\s*(?P<error>[^\\n]+)"
+      message_template: "🚨 **Build Failed**: {phase} phase - {error}"
+  message: "Build failure with detailed information"
+```
+
+### Troubleshooting Regex Patterns
+
+#### Common Issues
+
+1. **No Matches**: Pattern too specific or incorrect escaping
+2. **Invalid Regex**: Syntax errors in pattern
+3. **Missing Groups**: Template references non-existent groups
+4. **Performance**: Complex patterns causing slow processing
+
+#### Debug Configuration
+
+```yaml
+debugging:
+  log_levels:
+    pattern_matching: "DEBUG"  # Enable detailed pattern matching logs
+  error_reporting:
+    include_stack_traces: true  # Show regex compilation errors
+```
+
+#### Testing Patterns
+
+```python
+# Test regex patterns before deployment
+import re
+
+pattern = r"build\s+(?P<phase>\w+)\s+failed"
+test_content = "build compile failed with errors"
+
+match = re.search(pattern, test_content, re.IGNORECASE)
+if match:
+    print(f"Groups: {match.groupdict()}")
+    template = "Build Failed: {phase} phase"
+    print(f"Result: {template.format(**match.groupdict())}")
+```
+
 ## Recommendations Engine Configuration
 
 Generates actionable recommendations based on detected failure patterns.
@@ -239,22 +410,72 @@ recommendations:
 
 ### Pattern Condition Types
 
-Conditions support multiple formats:
+Conditions support multiple formats for flexible pattern matching:
 
 1. **Single String**: `"gradle"` - matches if "gradle" appears in content
 2. **OR Conditions**: `["test failed", "junit"]` - matches if ANY condition is found
 3. **AND Conditions**: Use separate items for AND logic
+4. **Regex with Capture Groups**: Advanced pattern matching with data extraction
+
+#### Regex Pattern Format
+
+```yaml
+conditions:
+  - type: "regex"
+    pattern: "build_number:\\s*(?P<build_num>\\d+)"
+    message_template: "📋 **Build Number**: {build_num}"
+    flags: 2  # Optional: re.IGNORECASE (default)
+```
+
+**Regex Pattern Fields:**
+- `type`: Must be "regex" for regex patterns
+- `pattern`: Regular expression with optional named capture groups
+- `message_template`: Template string using captured group names
+- `flags`: Optional regex flags (default: re.IGNORECASE)
+
+**Named Capture Groups:**
+- Use `(?P<name>pattern)` syntax for named groups
+- Access in templates with `{name}` placeholders
+- Automatically available for message interpolation
+
+**Numbered Capture Groups:**
+- Use `(pattern)` for numbered groups
+- Accessed as `{group_1}`, `{group_2}`, etc.
+- Fallback when named groups not used
 
 ### Example: Custom Recommendations
 
 ```yaml
 recommendations:
   patterns:
+    # Traditional string patterns
     docker_failures:
       conditions:
         - ["docker", "container"]
         - "image pull"
       message: "🐳 **Docker Issue**: Container or image problems. Check Docker daemon and registry connectivity."
+    
+    # Regex patterns with capture groups
+    version_extraction:
+      conditions:
+        - type: "regex"
+          pattern: "version:\\s*(?P<version>[0-9]+\\.[0-9]+\\.[0-9]+)"
+          message_template: "📦 **Version Detected**: {version}"
+      message: "Version information extracted from build logs"
+    
+    error_code_detection:
+      conditions:
+        - type: "regex"
+          pattern: "error_code:\\s*(?P<code>\\d+).*?message:\\s*(?P<msg>[^\\n]+)"
+          message_template: "⚠️ **Error {code}**: {msg}"
+      message: "Detailed error information captured"
+    
+    build_timing:
+      conditions:
+        - type: "regex"
+          pattern: "build took (?P<duration>\\d+)m(?P<seconds>\\d+)s"
+          message_template: "⏱️ **Build Duration**: {duration} minutes {seconds} seconds"
+      message: "Build timing analysis"
     
     database_connectivity:
       conditions:
@@ -787,7 +1008,7 @@ debugging:
 
 ## Real-World Examples
 
-### Example 1: Java/Spring Boot Environment
+### Example 1: Java/Spring Boot Environment with Regex Patterns
 
 ```yaml
 # Configuration optimized for Java/Spring Boot applications
@@ -805,6 +1026,7 @@ semantic_search:
 
 recommendations:
   patterns:
+    # Traditional patterns
     spring_boot_startup:
       conditions:
         - ["springframework", "boot"]
@@ -816,6 +1038,28 @@ recommendations:
         - "maven"
         - ["dependency", "artifact not found"]
       message: "📦 **Maven**: Dependency resolution issues. Update repositories or version conflicts."
+    
+    # Regex patterns for detailed extraction
+    java_exception_analysis:
+      conditions:
+        - type: "regex"
+          pattern: "(?P<exception>\\w+Exception).*?at (?P<location>[a-zA-Z0-9.]+)\\((?P<file>[^:]+):(?P<line>\\d+)\\)"
+          message_template: "☕ **Java Exception**: {exception} at {location} ({file}:{line})"
+      message: "Java exception with stack trace details"
+    
+    maven_version_conflict:
+      conditions:
+        - type: "regex"
+          pattern: "artifact (?P<artifact>[^:]+:[^:]+):(?P<version>[0-9.]+)"
+          message_template: "📦 **Maven Artifact**: {artifact} version {version}"
+      message: "Maven dependency version information"
+    
+    junit_test_failure:
+      conditions:
+        - type: "regex"
+          pattern: "(?P<test_class>[a-zA-Z0-9.]+)\\.(?P<test_method>\\w+).*?AssertionError:\\s*(?P<message>[^\\n]+)"
+          message_template: "🧪 **Test Failed**: {test_class}.{test_method} - {message}"
+      message: "JUnit test failure details"
 
 error_analysis:
   error_categories:

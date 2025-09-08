@@ -31,14 +31,14 @@ class QdrantVectorManager:
         self.cache_manager = cache_manager
         self.jenkins_client = jenkins_client
 
-        # Check if vector search is disabled via environment variable
+        # Check if vector search is disabled via environment variable (default: disabled)
         self.vector_search_disabled = os.getenv(
-            "DISABLE_VECTOR_SEARCH", ""
+            "DISABLE_VECTOR_SEARCH", "true"
         ).lower() in ("true", "1", "yes")
 
         if self.vector_search_disabled:
-            logger.warning(
-                "Vector search functionality is DISABLED via environment variable"
+            logger.info(
+                "Vector search functionality is DISABLED (default). Set DISABLE_VECTOR_SEARCH=false to enable."
             )
             logger.info(
                 "Initialized in mock mode. No Qdrant or SentenceTransformer will be loaded"

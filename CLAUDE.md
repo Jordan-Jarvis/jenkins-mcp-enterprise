@@ -38,14 +38,7 @@ The `--config` option is **required** for most operations to specify your Jenkin
 
 ```bash
 # All development commands should use --config
-python3 -m jenkins_mcp_enterprise.server --config config/mcp-config.yml
-
-# MCP Inspector testing
-npx @modelcontextprotocol/inspector --cli python3 -m jenkins_mcp_enterprise.server --config config/mcp-config.yml
-
-# Custom diagnostic parameters
-export JENKINS_MCP_DIAGNOSTIC_CONFIG="/path/to/custom-diagnostic-parameters.yml"
-python3 -m jenkins_mcp_enterprise.server --config config/mcp-config.yml
+npx @modelcontextprotocol/inspector --cli --method tools/list --server jenkins-mcp --config inspector-config.json 
 ```
 
 **Without `--config`:** The server will have no Jenkins instances configured and most tools will fail.
@@ -96,34 +89,17 @@ python3 tests/test_massive_scale_integration.py
 # Install MCP inspector for manual testing
 npm install -g @modelcontextprotocol/inspector
 
-# Run MCP inspector with server
-npx @modelcontextprotocol/inspector python3 -m jenkins_mcp_enterprise.server --config config/mcp-config.yml
 
 # Use --cli flag for command-line interface
-npx @modelcontextprotocol/inspector --cli python3 -m jenkins_mcp_enterprise.server --config config/mcp-config.yml
-
+npx @modelcontextprotocol/inspector --cli --method tools/list --server jenkins-mcp --config inspector-config.json 
+npx @modelcontextprotocol/inspector --cli --method tools/call --tool-name diagnose_build_failure --tool-arg job_name=QA_JOBS/master build_number=1225 custom_error_patterns='''["error"]''' --server jenkins-mcp --config inspector-config.json 
 For more usage and info refer to: https://modelcontextprotocol.io/llms-full.txt
 
 
 #### Production Mode (Docker - Required for Production Testing)
 ```bash
 # 1. Ensure Docker stack is running
-docker-compose up -d
 
-# 2. List available tools
-npx @modelcontextprotocol/inspector --cli --method tools/list \
-  docker run -i --rm --network jenkins_mcp_enterprise_mcp-net jenkins_mcp_enterprise-jenkins_mcp_enterprise-server:latest
-
-# 3. Call a specific tool (example: diagnose build failure)
-npx @modelcontextprotocol/inspector --cli -e HF_HOME=$HOME/.jenkins_mcp/hf_cache -- python3.13 -m jenkins_mcp_enterprise.server --config config/mcp-config.yml --method tools/call --tool-name diagnose_build_failure --tool-arg job_name=QA_JOBS/master build_number=1225 custom_error_patterns='''["error"]''' 
-
-# 4. Direct Python testing within Docker container
-docker run --rm --network jenkins_mcp_enterprise_mcp-net jenkins_mcp_enterprise-jenkins_mcp_enterprise-server:latest python3 -c "
-# Your Python test code here
-from jenkins_mcp_enterprise.jenkins.connection_manager import JenkinsConnectionManager
-# ... test code
-"
-```
 
 #### Common Docker MCP Patterns
 ```bash
@@ -175,10 +151,11 @@ python3 -m jenkins_mcp_enterprise.cli validate --config config/my-config.yml
 
 ### Diagnostic Configuration
 
-The `diagnose_build_failure` tool is fully configurable through YAML parameters. See comprehensive documentation:
+The `diagnose_build_failure` tool is fully configurable through YAML parameters with **advanced regex pattern support**. See comprehensive documentation:
 
 - **[Quick Reference](config/diagnostic-parameters-quick-reference.md)** - Common parameters and quick fixes
 - **[Complete Guide](config/diagnostic-parameters-guide.md)** - Detailed documentation with examples
+- **[Regex Pattern Examples](config/diagnostic-parameters-guide.md#advanced-regex-pattern-configuration)** - Advanced data extraction patterns
 
 ```bash
 # Validate current configuration

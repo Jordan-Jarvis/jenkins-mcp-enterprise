@@ -76,17 +76,30 @@ class StreamingLogProcessor:
             r"^\s*$",  # Empty lines
             r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$",  # Standalone timestamps
         ]
+        
+        # Timestamp removal regex (moved from cache manager for better performance)
+        self.timestamp_regex = re.compile(
+            r"^\d{2}:\d{2}:\d{2}(\.\d{3})?\s*|"
+            r"^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}:\d{2}(?:[.,]\d{3,6})?\s*|"
+            r"^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?\]\s*"
+        )
 
     def process_streaming(
         self, log_stream: io.TextIOBase, build: Build
     ) -> Generator[LogChunk, None, None]:
         """Process log stream in chunks, yielding semantic chunks"""
+        start_time = time.time()
+        
+        # Fast batch processing mode when vector search is disabled
+        if getattr(self, '_vector_search_disabled', True):
+            yield from self._process_batch_fast(log_stream, build, start_time)
+            return
+            
+        # Original streaming mode for vector search compatibility
         current_chunk_lines = []
         current_chunk_bytes = 0
         line_number = 0
         chunk_id = 0
-
-        start_time = time.time()
 
         try:
             for line in log_stream:
@@ -97,7 +110,9 @@ class StreamingLogProcessor:
                 if self._is_noise_line(line):
                     continue
 
-                current_chunk_lines.append((line_number, line.rstrip()))
+                # Remove timestamps for better context analysis while preserving original line structure
+                cleaned_line = self.timestamp_regex.sub("", line.rstrip())
+                current_chunk_lines.append((line_number, cleaned_line))
                 current_chunk_bytes += line_bytes
 
                 # Yield chunk when size limit reached or semantic boundary detected
@@ -126,6 +141,60 @@ class StreamingLogProcessor:
                 f"Error processing log stream for {build.job_name}#{build.build_number}: {e}"
             )
             raise CacheError(f"Stream processing failed: {e}")
+
+    def _process_batch_fast(
+        self, log_stream: io.TextIOBase, build: Build, start_time: float
+    ) -> Generator[LogChunk, None, None]:
+        """Fast batch processing mode - read entire file and process in bulk"""
+        try:
+            # Read entire file at once
+            content = log_stream.read()
+            if not content:
+                return
+                
+            # Compile combined noise pattern for single-pass removal
+            combined_noise_pattern = re.compile(
+                '|'.join(f'({pattern})' for pattern in self.noise_patterns),
+                re.IGNORECASE | re.MULTILINE
+            )
+            
+            # Apply all transformations in bulk
+            # 1. Remove noise lines (lines matching any noise pattern)
+            lines = content.split('\n')
+            filtered_lines = []
+            for line in lines:
+                if not combined_noise_pattern.search(line):
+                    # Remove timestamps and clean the line
+                    cleaned_line = self.timestamp_regex.sub("", line.rstrip())
+                    if cleaned_line:  # Skip empty lines after cleaning
+                        filtered_lines.append(cleaned_line)
+            
+            # 2. Rejoin content and split into semantic chunks
+            cleaned_content = '\n'.join(filtered_lines)
+            total_lines = len(filtered_lines)
+            
+            # Create chunks based on content size, not line-by-line processing
+            chunk_id = 0
+            chunk_size_chars = self.chunk_size_bytes  # Approximate bytes as chars
+            
+            for i in range(0, len(cleaned_content), chunk_size_chars):
+                chunk_content = cleaned_content[i:i + chunk_size_chars]
+                if chunk_content.strip():
+                    # Create a simplified chunk
+                    chunk_lines = [(0, chunk_content)]  # Single entry per chunk for simplicity
+                    yield self._create_chunk(build, chunk_id, chunk_lines)
+                    chunk_id += 1
+            
+            processing_time = (time.time() - start_time) * 1000
+            logger.info(
+                f"FAST MODE: Processed {total_lines} lines → {chunk_id} chunks in {processing_time:.1f}ms for {build.job_name}#{build.build_number}"
+            )
+            
+        except Exception as e:
+            logger.error(
+                f"Error in fast batch processing for {build.job_name}#{build.build_number}: {e}"
+            )
+            raise CacheError(f"Fast batch processing failed: {e}")
 
     def _create_chunk(
         self, build: Build, chunk_id: int, lines: List[Tuple[int, str]]

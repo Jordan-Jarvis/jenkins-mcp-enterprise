@@ -26,10 +26,17 @@ The Jenkins MCP server now uses a configurable diagnostic parameters system to e
 - Fallback analysis parameters
 - Pattern matching limits
 
+### Advanced Regex Patterns
+- Regex capture groups for data extraction
+- Dynamic message templates with interpolation
+- Named and numbered group support
+- Performance-optimized pattern compilation
+
 ### Recommendations Engine
-- Pattern-based recommendation mappings
+- Pattern-based recommendation mappings with smart data extraction
 - Priority job identification
 - Investigation guidance text
+- Template-based dynamic message generation
 
 ### Build Processing
 - Parallel processing limits
@@ -86,9 +93,20 @@ All hard-coded values from the original `diagnose_build_failure` tool have been 
 - Semantic search queries (9 patterns)
 - Failure pattern recognition (7 patterns) 
 - Recommendation mappings (6 categories)
+- **Regex pattern support** with capture groups and message templates
 - Processing limits and thresholds
 - Display formatting rules
 - Investigation guidance text
+
+### New Regex Pattern Features
+
+The system now supports advanced regex patterns for automated data extraction:
+
+- **Named Capture Groups**: Extract specific data using `(?P<name>pattern)` syntax
+- **Message Templates**: Dynamic message generation with `{captured_group}` placeholders
+- **Backward Compatibility**: Existing string patterns continue to work unchanged
+- **Performance Optimization**: Compiled regex patterns are cached for efficiency
+- **Error Handling**: Invalid patterns are logged but don't break the system
 
 ## Configuration Hot-Reload
 

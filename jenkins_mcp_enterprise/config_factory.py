@@ -57,7 +57,6 @@ class ConfigFactory:
 
         vector_config = VectorConfig(
             host="http://test-qdrant:6333",
-            api_key="",
             collection_name="test-jenkins-logs",
         )
 
@@ -77,7 +76,7 @@ class ConfigFactory:
         )
 
         vector_config = VectorConfig(
-            host="http://localhost:6333", api_key="", collection_name="dev-jenkins-logs"
+            host="http://localhost:6333", collection_name="dev-jenkins-logs"
         )
 
         return MCPConfig(

@@ -52,7 +52,6 @@ recommendations:
     gradle_build_failures:
       conditions:
         - "build failed"
-        - "gradle"
       message: "🛠️ **Gradle Build**: Run with --debug for detailed error info. Check for dependency conflicts."
     
     compilation_errors:
@@ -63,19 +62,20 @@ recommendations:
     
     network_timeouts:
       conditions:
-        - ["timeout", "connection refused"]  # OR condition
+        - ["connection refused"]  # OR condition
       message: "🌐 **Network/Timeout**: Network connectivity issues. Check firewall rules and service availability."
     
     test_failures:
       conditions:
-        - ["test failed", "junit"]  # OR condition  
+        - ["test failed", "junit", "FAILED"]  # OR condition  
       message: "🧪 **Test Failures**: Unit/integration tests failing. Review test logs for assertion failures."
     
     memory_issues:
       conditions:
         - ["out of memory", "heap space"]  # OR condition
       message: "💾 **Memory**: Increase JVM heap size with -Xmx flag or optimize memory usage."
-  
+    
+
   # Priority job patterns for focused recommendations
   priority_jobs:
     product_app_pattern: "django_build"
@@ -99,14 +99,14 @@ recommendations:
 build_processing:
   # Parallel processing settings
   parallel:
-    max_batch_size: 5  # Process up to 5 builds concurrently
-    max_workers: 5     # Maximum number of worker threads
+    max_batch_size: 15  # Process up to 15 builds concurrently
+    max_workers: 10     # Maximum number of worker threads
   
   # Chunk processing limits
   chunks:
-    max_chunks_for_analysis: 10      # Top chunks for fallback analysis
-    max_chunks_for_content: 20       # Max chunks to sample for recommendations
-    max_total_chunks_analyzed: 1000  # Global limit for chunk processing
+    max_chunks_for_analysis: 1000      # Top chunks for fallback analysis
+    max_chunks_for_content: 500       # Max chunks to sample for recommendations 
+    max_total_chunks_analyzed: 2000   # Global limit for chunk processing
 
 # Summary Generation Configuration
 summary:
@@ -121,9 +121,9 @@ summary:
 # Context and Token Management
 context:
   # Token limits for various operations
-  max_tokens_total: 10000
-  max_tokens_per_chunk: 1000
-  truncation_threshold: 8000
+  max_tokens_total: 5000
+  max_tokens_per_chunk: 500
+  truncation_threshold: 4000
   
   # Chunk value scoring
   high_value_chunk_threshold: 0.7
@@ -261,3 +261,4 @@ debugging:
     include_stack_traces: false
     max_error_message_length: 200
     aggregate_similar_errors: true
+

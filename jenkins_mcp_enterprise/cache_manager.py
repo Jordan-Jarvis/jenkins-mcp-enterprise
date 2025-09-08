@@ -1,4 +1,7 @@
 import re  # Added for timestamp removal
+import fcntl
+import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
@@ -36,13 +39,20 @@ class CacheManager:
             vector_manager: Optional vector manager for automatic indexing
         """
         self.config = config
-        self.cache_dir = config.base_dir
+        
+        # Generate unique instance UUID for multiple instance support
+        self.instance_uuid = str(uuid.uuid4())[:8]  # Use short UUID for readability
+        
+        # Create instance-specific cache directory to avoid conflicts
+        self.cache_dir = config.base_dir / f"instance-{self.instance_uuid}"
+        
         self.max_size_mb = config.max_size_mb
         self.retention_days = config.retention_days
         self.enable_compression = config.enable_compression
         self.vector_manager = vector_manager
 
-        logger.info(f"Cache manager initialized with directory: {self.cache_dir}")
+        logger.info(f"Cache manager initialized with instance UUID: {self.instance_uuid}")
+        logger.info(f"Cache directory: {self.cache_dir}")
 
         # Ensure cache directory exists
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -62,6 +72,7 @@ class CacheManager:
     def fetch(self, client: "JenkinsClient", build: Build) -> Path:
         """
         Fetches the console log for a build, caching it if not already present.
+        Uses file locking to handle concurrent access safely.
         Automatically indexes the log for vector search if vector manager is available.
 
         Args:
@@ -72,35 +83,65 @@ class CacheManager:
             The Path to the cached console log file.
         """
         log_path = self.get_path(build)
-        is_new_fetch = not log_path.exists()
+        lock_path = log_path.with_suffix('.lock')
+        
+        # Check if file already exists (quick check before locking)
+        if log_path.exists():
+            return log_path
+        
+        # Use file locking for concurrent access safety
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            with open(lock_path, 'w') as lock_file:
+                # Try to acquire exclusive lock with timeout
+                for attempt in range(10):  # Max 10 seconds wait
+                    try:
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except IOError:
+                        if attempt == 9:  # Last attempt
+                            logger.warning(f"Could not acquire lock for {build.job_name} #{build.build_number} after 10s")
+                            # Proceed without lock as fallback
+                            break
+                        time.sleep(1)
+                
+                # Double-check if file was created by another process while we waited
+                if log_path.exists():
+                    return log_path
+                
+                # Fetch and process the log
+                logger.info(f"Fetching log for {build.job_name} #{build.build_number}")
+                raw_console_text = client.get_console_text(
+                    build.job_name, build.build_number
+                )
 
-        if is_new_fetch:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            raw_console_text = client.get_console_text(
-                build.job_name, build.build_number
-            )
+                # Store raw logs - timestamp processing moved to analysis phase for better performance
+                processed_console_text = raw_console_text
 
-            # Remove timestamps from each line
-            lines = raw_console_text.splitlines()
-            processed_lines = [self.TIMESTAMP_REGEX.sub("", line) for line in lines]
-            processed_console_text = "\n".join(processed_lines)
+                log_path.write_text(
+                    processed_console_text, encoding="utf-8"
+                )
 
-            log_path.write_text(
-                processed_console_text, encoding="utf-8"
-            )  # Specify encoding
+                # Automatically index the log for vector search if available and enabled
+                if self.vector_manager and not getattr(self.vector_manager, 'vector_search_disabled', True):
+                    try:
+                        logger.info(
+                            f"Auto-indexing log for vector search: {build.job_name} #{build.build_number}"
+                        )
+                        self.vector_manager.index_build_log(build, log_path)
+                        logger.info(
+                            f"Successfully indexed log: {build.job_name} #{build.build_number}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to auto-index log for vector search: {e}")
 
-            # Automatically index the log for vector search if available
-            if self.vector_manager:
-                try:
-                    logger.info(
-                        f"Auto-indexing log for vector search: {build.job_name} #{build.build_number}"
-                    )
-                    self.vector_manager.index_build_log(build, log_path)
-                    logger.info(
-                        f"Successfully indexed log: {build.job_name} #{build.build_number}"
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to auto-index log for vector search: {e}")
+        finally:
+            # Clean up lock file
+            try:
+                lock_path.unlink(missing_ok=True)
+            except Exception:
+                pass  # Ignore cleanup errors
 
         return log_path
 

@@ -11,7 +11,7 @@ from jenkins_mcp_enterprise.di_container import DIContainer
 from jenkins_mcp_enterprise.jenkins.jenkins_client import JenkinsClient
 from jenkins_mcp_enterprise.tool_factory import ToolFactory
 from jenkins_mcp_enterprise.vector_manager import QdrantVectorManager
-from tests.test_fixtures import BuildDataFactory, LogDataFactory, jenkins_test_env
+from .test_fixtures import BuildDataFactory, LogDataFactory, jenkins_test_env
 
 
 class TestDependencyInjectionIntegration:

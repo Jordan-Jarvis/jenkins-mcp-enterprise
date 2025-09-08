@@ -58,11 +58,20 @@ failure_patterns:
 ```yaml
 recommendations:
   patterns:
+    # Simple string patterns
     your_pattern_name:
       conditions:
         - "error pattern to match"
         - ["option1", "option2"]  # OR condition
       message: "🔧 **Your Fix**: Description of solution"
+    
+    # Regex patterns with capture groups
+    regex_pattern_name:
+      conditions:
+        - type: "regex"
+          pattern: "error_code:\\s*(?P<code>\\d+)"
+          message_template: "⚠️ **Error {code}**: Specific error detected"
+      message: "Fallback message if template fails"
   max_recommendations: 6       # Total shown (4-10)
 ```
 
@@ -96,6 +105,42 @@ debugging:
   performance: {log_processing_times: true, track_chunk_counts: true}
 ```
 
+## Regex Pattern Templates
+
+### Basic Regex Pattern
+```yaml
+pattern_name:
+  conditions:
+    - type: "regex"
+      pattern: "your_regex_pattern_here"
+      message_template: "Message with {captured_groups}"
+  message: "Fallback message"
+```
+
+### Common Regex Examples
+```yaml
+# Extract version numbers
+version_detection:
+  conditions:
+    - type: "regex"
+      pattern: "version:\\s*(?P<version>\\d+\\.\\d+\\.\\d+)"
+      message_template: "📦 **Version**: {version}"
+
+# Parse error codes
+error_codes:
+  conditions:
+    - type: "regex"
+      pattern: "error\\s+(\\d+):\\s*(.+)"
+      message_template: "🚨 **Error {group_1}**: {group_2}"
+
+# Build timing
+build_duration:
+  conditions:
+    - type: "regex"
+      pattern: "completed in (?P<minutes>\\d+)m(?P<seconds>\\d+)s"
+      message_template: "⏱️ **Duration**: {minutes}m{seconds}s"
+```
+
 ## Technology-Specific Quick Configs
 
 ### Java/Spring Boot
@@ -106,6 +151,16 @@ semantic_search:
     - "java.lang.NullPointerException"
     - "maven dependency"
     - "junit test failed"
+
+# Regex patterns for Java stack traces
+recommendations:
+  patterns:
+    java_exceptions:
+      conditions:
+        - type: "regex"
+          pattern: "(?P<exception>\\w+Exception).*?at (?P<class>[a-zA-Z0-9.]+)\\((?P<file>[^:]+):(?P<line>\\d+)\\)"
+          message_template: "☕ **{exception}**: at {class} ({file}:{line})"
+      message: "Java exception detected"
 ```
 
 ### Docker/Kubernetes

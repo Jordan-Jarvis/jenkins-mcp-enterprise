@@ -10,7 +10,8 @@ A production-ready Model Context Protocol (MCP) server that transforms how AI as
 - **AI-Powered Diagnostics**: Advanced failure analysis that actually understands your build errors
 - **Hierarchical Sub-Build Discovery**: Navigate complex pipeline structures with unlimited depth
 - **Massive Log Handling**: Process 10+ GB logs efficiently with streaming and intelligent chunking
-- **Smart Error Pattern Recognition**: Configurable rules that learn your organization's specific failure patterns
+- **Smart Error Pattern Recognition**: Configurable rules with regex capture groups for automated data extraction
+- **Dynamic Message Generation**: Extract specific error codes, versions, and timestamps from build logs automatically
 
 ### 🏢 **Enterprise Multi-Jenkins Support**
 - **Load-Balanced Routing**: Automatic instance selection across multiple Jenkins servers
@@ -20,9 +21,10 @@ A production-ready Model Context Protocol (MCP) server that transforms how AI as
 
 ### 🧠 **Configurable AI Diagnostics**
 - **Organization-Specific Tuning**: Customize diagnostic behavior for your tech stack
+- **Advanced Pattern Matching**: Regex capture groups with dynamic message templates
 - **Keyword-Based Instructions**: LLM receives tailored guidance based on build failure patterns
 - **Semantic Search**: Vector-powered log analysis finds relevant context across massive logs
-- **Custom Recommendation Engine**: Generate actionable insights specific to your infrastructure
+- **Custom Recommendation Engine**: Generate actionable insights with extracted data interpolation
 
 ### ⚡ **Performance & Scalability**
 - **Parallel Processing**: Concurrent analysis of complex pipeline hierarchies

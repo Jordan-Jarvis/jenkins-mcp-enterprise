@@ -122,13 +122,15 @@ class ToolFactory:
         tools[navigate_tool.name] = navigate_tool
 
         # Tools requiring JenkinsClient, CacheManager, and VectorManager (now with multi-instance support)
-        semantic_search_tool = SemanticSearchTool(
-            vector_manager=vector_manager,
-            jenkins_client=jenkins_client,
-            cache_manager=cache_manager,
-            multi_jenkins_manager=multi_jenkins_manager,
-        )
-        tools[semantic_search_tool.name] = semantic_search_tool
+        # Only register semantic search tool if vector search is enabled
+        if not getattr(vector_manager, 'vector_search_disabled', True):
+            semantic_search_tool = SemanticSearchTool(
+                vector_manager=vector_manager,
+                jenkins_client=jenkins_client,
+                cache_manager=cache_manager,
+                multi_jenkins_manager=multi_jenkins_manager,
+            )
+            tools[semantic_search_tool.name] = semantic_search_tool
 
         diagnose_tool = DiagnoseBuildFailureTool(
             jenkins_client=jenkins_client,
@@ -171,4 +173,12 @@ class ToolFactory:
         Returns:
             The number of tools this factory creates
         """
-        return 10  # Current number of tools in the system
+        # Base tools count (without vector search tools)
+        base_count = 9
+        
+        # Add vector search tools if enabled
+        vector_manager = self.container.get_vector_manager()
+        if not getattr(vector_manager, 'vector_search_disabled', True):
+            base_count += 1  # semantic_search tool
+            
+        return base_count
