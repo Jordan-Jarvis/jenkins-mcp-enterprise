@@ -61,7 +61,7 @@ class SubBuildDiscoverer:
         self,
         parent_job_name: str,
         parent_build_number: int,
-        max_depth: int = 5,
+        max_depth: int = 15,
         parallel: bool = True,
     ) -> List[SubBuild]:
         """

@@ -75,7 +75,7 @@ class SubBuildTraversalTool(JenkinsOperationTool):
             sub_builds_objects: List[SubBuild] = jenkins_client.discover_subbuilds(
                 parent_job_name,
                 parent_build_number,
-                max_depth=10,  # Increase depth to catch deeply nested builds
+                max_depth=15,  # Increase depth to catch deeply nested builds
             )
         except Exception as e:
             # If discovery fails, log the error but continue with empty list

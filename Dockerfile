@@ -1,5 +1,5 @@
 # Dockerfile for Jenkins MCP Server
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -15,14 +15,12 @@ RUN apt-get update && apt-get install -y ripgrep && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 # Copy requirements and install Python dependencies
-COPY requirements.txt ./
-COPY pyproject.toml ./
-COPY README.md ./
-COPY jenkins_mcp_enterprise/ ./jenkins_mcp_enterprise/
+
+COPY ./ ./
 
 # Install the package
-RUN pip install -e .
-
+RUN pip3 install -r requirements.txt
+RUN pip3 install -e .
 # Copy configuration
 COPY config/ ./config/
 
@@ -35,4 +33,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 # Run the MCP server in HTTP mode (no proxy needed)  
 EXPOSE 8000
-CMD ["python3", "-m", "jenkins_mcp_enterprise.server", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000", "--config", "/app/config/mcp-config.yml"]
+CMD ["python3", "-m","jenkins_mcp_enterprise.server", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000", "--config", "/app/config/mcp-config.yml"]
