@@ -394,6 +394,17 @@ def seeded_jenkins_test_env(jenkins_test_env, sample_builds, sample_logs):
                         },
                     ]
                 },
+                # Add explicit causes so strict downstream validation can confirm these
+                # are true children of QA_JOBS/master#9.
+                {
+                    "causes": [
+                        {
+                            "upstreamProject": "QA_JOBS/master",
+                            "upstreamBuild": 9,
+                            "shortDescription": "Started by upstream project QA_JOBS/master build #9",
+                        }
+                    ]
+                },
             ],
         },
     )
@@ -405,11 +416,51 @@ def seeded_jenkins_test_env(jenkins_test_env, sample_builds, sample_logs):
 
     # Add sub-builds triggered by the master build
     env.add_jenkins_job("QA_JOBS/sub-build-1", {"name": "sub-build-1"})
-    env.add_jenkins_build("QA_JOBS/sub-build-1", 1, {"result": "SUCCESS"})
+    env.add_jenkins_build(
+        "QA_JOBS/sub-build-1",
+        1,
+        {
+            "result": "SUCCESS",
+            "actions": [
+                {
+                    "causes": [
+                        {
+                            "upstreamProject": "QA_JOBS/master",
+                            "upstreamBuild": 9,
+                            "shortDescription": "Started by upstream project QA_JOBS/master build #9",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
     env.add_console_log("QA_JOBS/sub-build-1", 1, sample_logs["success"])
 
     env.add_jenkins_job("QA_JOBS/sub-build-2", {"name": "sub-build-2"})
-    env.add_jenkins_build("QA_JOBS/sub-build-2", 1, {"result": "FAILURE"})
-    env.add_console_log("QA_JOBS/sub-build-2", 1, sample_logs["failure"])
+    env.add_jenkins_build(
+        "QA_JOBS/sub-build-2",
+        1,
+        {
+            "result": "FAILURE",
+            "actions": [
+                {
+                    "causes": [
+                        {
+                            "upstreamProject": "QA_JOBS/master",
+                            "upstreamBuild": 9,
+                            "shortDescription": "Started by upstream project QA_JOBS/master build #9",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+    # Ensure the failing sub-build contains an explicit ERROR line so error analysis
+    # can focus on this build (not the parent pipeline).
+    env.add_console_log(
+        "QA_JOBS/sub-build-2",
+        1,
+        sample_logs["failure"] + "\n[ERROR] Sub-build-2 failure marker\n",
+    )
 
     return env

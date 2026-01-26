@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from ..base import ParameterSpec, SubBuild
+from ..jenkins.build_tree import annotate_build_tree, flatten_build_tree
 from ..cache_manager import CacheManager
 from ..jenkins.jenkins_client import JenkinsClient
 from ..jenkins.job_name_utils import JobNameParser
@@ -70,80 +71,79 @@ class SubBuildTraversalTool(JenkinsOperationTool):
                 "instructions": self.get_instance_instructions(),
             }
 
-        # Use the RECURSIVE discovery method from SubBuildDiscoverer with higher max_depth
+        # Canonical: build an explicit subtree structure from the discovery layer.
+        # We keep the legacy flat list (`sub_builds`) for backward compatibility,
+        # but the *source of truth* becomes `build_tree`.
         try:
-            sub_builds_objects: List[SubBuild] = jenkins_client.discover_subbuilds(
-                parent_job_name,
-                parent_build_number,
-                max_depth=15,  # Increase depth to catch deeply nested builds
+            build_tree = jenkins_client.get_build_hierarchy(
+                parent_job_name, parent_build_number, max_depth=15
             )
+            annotate_build_tree(build_tree)
         except Exception as e:
-            # If discovery fails, log the error but continue with empty list
-            # This prevents the entire tool from failing due to one bad sub-build
             import logging
 
             logger = logging.getLogger(__name__)
             logger.warning(
-                f"Sub-build discovery failed for {parent_job_name}#{parent_build_number}: {e}"
+                f"Sub-build hierarchy discovery failed for {parent_job_name}#{parent_build_number}: {e}"
             )
-            sub_builds_objects = []
+            build_tree = {
+                "job_name": parent_job_name,
+                "build_number": parent_build_number,
+                "status": "UNKNOWN",
+                "url": None,
+                "depth": 0,
+                "children": [],
+            }
 
-        # Add progress logging and optional limiting for large pipelines
+        # Add progress logging
         import logging
 
         logger = logging.getLogger(__name__)
+        flat_nodes = flatten_build_tree(build_tree)
+        # Exclude root from "sub_builds" list
+        sub_nodes = [n for n in flat_nodes if n.get("depth", 0) != 0]
+
         logger.info(
-            f"Processing {len(sub_builds_objects)} discovered sub-builds for {parent_job_name}#{parent_build_number}"
+            f"Processing {len(sub_nodes)} discovered sub-builds for {parent_job_name}#{parent_build_number}"
         )
 
         results = []
-        for i, sub_build in enumerate(sub_builds_objects):
-            # Log progress every 10 items
+        for i, node in enumerate(sub_nodes):
             if i % 10 == 0 and i > 0:
-                logger.info(f"Processed {i}/{len(sub_builds_objects)} sub-builds...")
+                logger.info(f"Processed {i}/{len(sub_nodes)} sub-builds...")
 
-            # Check if this is a pipeline stage vs a real Jenkins job
-            is_pipeline_stage = self._is_pipeline_stage(sub_build, parent_job_name)
+            job_name = node.get("job_name")
+            build_number = int(node.get("build_number") or 0)
 
-            # Try to fetch logs, but handle pipeline stages gracefully
+            # Keep pipeline-stage heuristic for now (tree discovery can surface stage-like nodes)
+            is_pipeline_stage = self._is_pipeline_stage(
+                SubBuild(job_name=job_name, build_number=build_number, url=node.get("url"), status=node.get("status")),
+                parent_job_name,
+            )
+
             log_path_obj = None
             log_error = None
 
             if not is_pipeline_stage:
                 try:
-                    log_path_obj = self.cache_manager.fetch(jenkins_client, sub_build)
+                    # Cache manager expects a Build-like object; SubBuild is fine.
+                    log_path_obj = self.cache_manager.fetch(
+                        jenkins_client,
+                        SubBuild(
+                            job_name=job_name,
+                            build_number=build_number,
+                            url=node.get("url"),
+                            status=node.get("status"),
+                        ),
+                    )
                 except Exception as e:
                     log_error = str(e)
-                    # For real jobs that fail to fetch logs, this is still an error we want to record
-                    import logging
-
-                    logger = logging.getLogger(__name__)
                     logger.warning(
-                        f"Failed to fetch log for {sub_build.job_name}#{sub_build.build_number}: {e}"
+                        f"Failed to fetch log for {job_name}#{build_number}: {e}"
                     )
             else:
-                # For pipeline stages, don't try to fetch logs as they're not real Jenkins jobs
                 log_path_obj = "N/A (Pipeline Stage)"
 
-            # Final status check - only for real jobs, not pipeline stages
-            current_status = sub_build.status
-            if not is_pipeline_stage and (
-                current_status == "UNKNOWN"
-                or current_status == "RUNNING"
-                or not current_status
-            ):
-                try:
-                    build_info = jenkins_client.get_build_info(
-                        sub_build.job_name, sub_build.build_number, depth=0
-                    )
-                    final_status = build_info.get("result")
-                    if final_status is None and build_info.get("building", False):
-                        final_status = "RUNNING"
-                    current_status = final_status or current_status or "UNKNOWN"
-                except Exception:
-                    current_status = sub_build.status
-
-            # Process log path
             if log_path_obj is None:
                 processed_log_path = (
                     f"ERROR: {log_error}" if log_error else "No log available"
@@ -155,15 +155,17 @@ class SubBuildTraversalTool(JenkinsOperationTool):
 
             results.append(
                 {
-                    "job_name": sub_build.job_name,
-                    "build_number": sub_build.build_number,
-                    "status": current_status,
+                    "job_name": job_name,
+                    "build_number": build_number,
+                    "status": node.get("status") or "UNKNOWN",
                     "log_path": processed_log_path,
-                    "url": sub_build.url,
-                    "depth": sub_build.depth,
-                    "parent_job_name": sub_build.parent_job_name,
-                    "parent_build_number": sub_build.parent_build_number,
+                    "url": node.get("url"),
+                    "depth": int(node.get("depth") or 0),
+                    "parent_job_name": node.get("parent_job_name"),
+                    "parent_build_number": node.get("parent_build_number"),
                     "is_pipeline_stage": is_pipeline_stage,
+                    # New canonical failure field name
+                    "failed": bool(node.get("failed", False)),
                 }
             )
 
@@ -172,6 +174,7 @@ class SubBuildTraversalTool(JenkinsOperationTool):
                 "job_name": parent_job_name,
                 "build_number": parent_build_number,
             },
+            "build_tree": build_tree,
             "sub_builds_count": len(results),
             "sub_builds": results,
         }

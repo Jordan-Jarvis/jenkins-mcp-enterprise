@@ -142,7 +142,7 @@ class TestToolScenarios:
         jenkins_url = config["jenkins"]["url"]
 
         async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
-            # Diagnose the failed master  build
+            # Diagnose the failed master build
             diagnose_result = await client.call_tool(
                 "diagnose_build_failure",
                 {
@@ -167,6 +167,12 @@ class TestToolScenarios:
             assert "recommendations" in data
             assert len(data["recommendations"]) > 0
 
+            # Error analysis should focus on the failing sub-build (not the root job)
+            # when skip_successful_builds is true (default).
+            assert all(
+                e.get("job_name") != "QA_JOBS/master" for e in data["error_analysis"]["errors"]
+            )
+
             # Should find ERROR messages in the failed build
             error_found = False
             for error in data["error_analysis"]["errors"]:
@@ -175,8 +181,67 @@ class TestToolScenarios:
                     break
             assert error_found, "Should find ERROR in failed build"
 
+            # Parent pointers should be removed from the tree output to save tokens
+            # (hierarchy already implies parentage)
+            tree = data.get("sub_build_information", {}).get("build_tree", {})
+            if isinstance(tree, dict):
+                assert "parent_job_name" not in tree
+                assert "parent_build_number" not in tree
+
             assert "recommendations" in data
             assert len(data["recommendations"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_diagnose_prunes_passing_branches_by_default(self, seeded_jenkins_test_env):
+        """By default (skip_successful_builds=True), only show paths leading to failures."""
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
+
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
+            diagnose_result = await client.call_tool(
+                "diagnose_build_failure",
+                {
+                    "job_name": "QA_JOBS/master",
+                    "build_number": 9,
+                    "jenkins_url": jenkins_url,
+                    # skip_successful_builds omitted (default True)
+                },
+            )
+
+            assert "content" in diagnose_result
+            data = json.loads(diagnose_result["content"][0]["text"])
+
+            # In the seeded test data, sub-build-1 is SUCCESS and should be pruned
+            # because it is not on a path to a failure.
+            names = [b.get("job_name") for b in data.get("sub_builds", [])]
+            assert "QA_JOBS/sub-build-1" not in names
+
+            # The failing sub-build should remain.
+            assert "QA_JOBS/sub-build-2" in names
+
+    @pytest.mark.asyncio
+    async def test_diagnose_includes_all_branches_when_skip_disabled(self, seeded_jenkins_test_env):
+        """When skip_successful_builds=False, the full tree (including passing branches) is shown."""
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
+
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
+            diagnose_result = await client.call_tool(
+                "diagnose_build_failure",
+                {
+                    "job_name": "QA_JOBS/master",
+                    "build_number": 9,
+                    "jenkins_url": jenkins_url,
+                    "skip_successful_builds": False,
+                },
+            )
+
+            assert "content" in diagnose_result
+            data = json.loads(diagnose_result["content"][0]["text"])
+
+            names = [b.get("job_name") for b in data.get("sub_builds", [])]
+            assert "QA_JOBS/sub-build-1" in names
+            assert "QA_JOBS/sub-build-2" in names
 
 
     @pytest.mark.asyncio
