@@ -21,6 +21,7 @@ class TestSimpleValidation:
     async def simple_jenkins(self):
         """Simple Jenkins test double"""
         jenkins = JenkinsTestDouble(port=18083)
+        jenkins.add_job("sample-job", {"name": "sample-job", "nextBuildNumber": 42})
         jenkins.start()
 
         yield jenkins

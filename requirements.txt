@@ -17,8 +17,8 @@ typing-extensions>=4.7.0
 tzdata>=2023.3
 tzlocal>=5.0
 urllib3>=2.0.0
-mcp>=1.9.3
-fastmcp==2.12.2
+mcp
+fastmcp
 qdrant-client>=1.14.3
 sentence-transformers>=2.2.0
 tiktoken>=0.5.0

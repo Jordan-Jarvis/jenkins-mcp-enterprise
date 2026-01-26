@@ -382,7 +382,7 @@ cp jenkins_mcp_enterprise/diagnostic_config/diagnostic-parameters.yml config/dia
 - **[Configuration Guide](config/README.md)** - Complete setup instructions
 - **[Diagnostic Parameters Guide](config/diagnostic-parameters-guide.md)** - Complete AI customization
 - **[Diagnostic Quick Reference](config/diagnostic-parameters-quick-reference.md)** - Common configurations
-- **[Developer Guide](CLAUDE.md)** - Architecture and development
+- **[Developer Guide](AGENTS.md)** - Architecture and development
 
 ### 🧪 **Examples**
 ```bash

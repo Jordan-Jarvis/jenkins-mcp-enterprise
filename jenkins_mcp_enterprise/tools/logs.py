@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any, Dict, List
 
@@ -74,7 +75,9 @@ class LogContextTool(LogOperationTool):
             job_name, build_number, jenkins_url
         )
         if error:
-            return error
+            # The error from fetch_log is a dict with an 'error' key
+            error_message = error.get("error", "Unknown error fetching log")
+            raise ToolExecutionError(error_message)
 
         build_obj = Build(job_name=job_name, build_number=build_number)
         lines = self.cache_manager.read_lines(log_path)

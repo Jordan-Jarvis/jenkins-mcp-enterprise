@@ -1,6 +1,7 @@
 """MCP test infrastructure validation"""
 
 import asyncio
+import os
 import shutil
 import tempfile
 
@@ -14,40 +15,23 @@ from .test_doubles import JenkinsTestDouble, QdrantTestDouble
 class TestInfrastructure:
     """Test MCP infrastructure and protocol compliance"""
 
-    @pytest_asyncio.fixture
-    async def minimal_environment(self):
-        """Minimal test environment for infrastructure testing"""
-        cache_dir = tempfile.mkdtemp(prefix="test-mcp-infra-")
-
-        config = {
-            "jenkins_url": "http://localhost:18080",
-            "jenkins_user": "test_user",
-            "jenkins_token": "test_token",
-            "qdrant_host": "http://localhost:16333",
-            "cache_dir": cache_dir,
-            "log_level": "DEBUG",
-        }
-
-        yield {"config": config, "cache_dir": cache_dir}
-
-        shutil.rmtree(cache_dir, ignore_errors=True)
 
     @pytest.mark.asyncio
-    async def test_jenkins_mcp_enterprise_startup(self, minimal_environment):
+    async def test_jenkins_mcp_enterprise_startup(self, seeded_jenkins_test_env):
         """Test that MCP server starts up correctly"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
 
-        async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Server should start without errors
             assert client.process is not None
-            assert client.process.poll() is None  # Process should still be running
+            assert client.process.returncode is None  # Process should still be running
 
     @pytest.mark.asyncio
-    async def test_mcp_protocol_compliance(self, minimal_environment):
+    async def test_mcp_protocol_compliance(self, seeded_jenkins_test_env):
         """Test MCP protocol compliance"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
 
-        async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Test tools/list endpoint
             tools = await client.list_tools()
 
@@ -66,54 +50,51 @@ class TestInfrastructure:
                 assert "properties" in schema
 
     @pytest.mark.asyncio
-    async def test_json_rpc_format(self, minimal_environment):
+    async def test_json_rpc_format(self, seeded_jenkins_test_env):
         """Test JSON-RPC format compliance"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
-        async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Test that responses follow JSON-RPC 2.0 format
             result = await client.call_tool(
-                "get_job_parameters", {"job_name": "any-job"}
+                "get_job_parameters",
+                {"job_name": "any-job", "jenkins_url": jenkins_url},
             )
 
             # Should have JSON-RPC 2.0 structure
-            assert "jsonrpc" in result
-            assert result["jsonrpc"] == "2.0"
-            assert "id" in result
-
-            # Should have either result or error, but not both
-            assert ("result" in result) != ("error" in result)
-
-            if "error" in result:
-                error = result["error"]
-                assert "code" in error
-                assert "message" in error
+            if result.get("isError"):
+                assert "content" in result
+            else:
+                assert "jsonrpc" in result
+                assert result["jsonrpc"] == "2.0"
+                assert "id" in result
+                assert "result" in result
 
     @pytest.mark.asyncio
-    async def test_error_response_format(self, minimal_environment):
+    async def test_error_response_format(self, seeded_jenkins_test_env):
         """Test that error responses follow MCP format"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
-        async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Trigger an error by calling with invalid parameters
-            result = await client.call_tool("trigger_build_async", {})
+            result = await client.call_tool(
+                "trigger_build_async", {"jenkins_url": jenkins_url}
+            )
 
-            assert "error" in result
-            error = result["error"]
-
-            # Error should have required fields
-            assert "code" in error
-            assert "message" in error
-            assert isinstance(error["code"], int)
-            assert isinstance(error["message"], str)
-            assert len(error["message"]) > 0
+            assert result.get("isError") is True
+            assert "content" in result
+            error_msg = result["content"][0]["text"].lower()
+            assert "validation" in error_msg or "required" in error_msg
 
     @pytest.mark.asyncio
-    async def test_tool_parameter_validation(self, minimal_environment):
+    async def test_tool_parameter_validation(self, seeded_jenkins_test_env):
         """Test that tool parameter validation works correctly"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
-        async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             tools = await client.list_tools()
 
             # Find a tool with required parameters
@@ -130,31 +111,40 @@ class TestInfrastructure:
             assert "job_name" in schema["required"]
 
             # Test calling without required parameter
-            result = await client.call_tool("trigger_build_async", {})
-            assert "error" in result
+            result = await client.call_tool(
+                "trigger_build_async", {"jenkins_url": jenkins_url}
+            )
+            assert result.get("isError") is True
 
             # Test calling with required parameter
             result = await client.call_tool(
-                "trigger_build_async", {"job_name": "test-job"}
+                "trigger_build_async",
+                {"job_name": "test-job", "jenkins_url": jenkins_url},
             )
 
             # Should either succeed or fail with a different error (not parameter validation)
-            if "error" in result:
-                # Error should not be about missing required parameters
-                error_msg = result["error"]["message"].lower()
-                assert "required" not in error_msg or "job_name" not in error_msg
+            if result.get("isError"):
+                error_msg = result["content"][0]["text"].lower()
+                assert "required" not in error_msg and "job_name" not in error_msg
 
     @pytest.mark.asyncio
-    async def test_concurrent_requests(self, minimal_environment):
+    async def test_concurrent_requests(self, seeded_jenkins_test_env):
         """Test that server handles concurrent requests correctly"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
-        async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Send multiple concurrent requests
             tasks = [
                 client.list_tools(),
-                client.call_tool("get_job_parameters", {"job_name": "test-job"}),
-                client.call_tool("trigger_build_async", {"job_name": "test-job"}),
+                client.call_tool(
+                    "get_job_parameters",
+                    {"job_name": "test-job", "jenkins_url": jenkins_url},
+                ),
+                client.call_tool(
+                    "trigger_build_async",
+                    {"job_name": "test-job", "jenkins_url": jenkins_url},
+                ),
                 client.list_tools(),
             ]
 
@@ -170,42 +160,51 @@ class TestInfrastructure:
             assert results[0] == results[3]
 
     @pytest.mark.asyncio
-    async def test_server_shutdown_cleanup(self, minimal_environment):
+    async def test_server_shutdown_cleanup(self, seeded_jenkins_test_env):
         """Test that server shuts down cleanly"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
-        client = MCPTestClient("jenkins_mcp_enterprise/server.py", config)
+        client = MCPTestClient("jenkins_mcp_enterprise.server", config)
 
         # Start server
         await client.start_server()
 
         # Verify it's running
         assert client.process is not None
-        assert client.process.poll() is None
+        assert client.process.returncode is None
 
         # Call a tool to verify it's responding
-        result = await client.call_tool("get_job_parameters", {"job_name": "test"})
-        assert "result" in result or "error" in result
+        result = await client.call_tool(
+            "get_job_parameters",
+            {"job_name": "test", "jenkins_url": jenkins_url},
+        )
+        assert "result" in result or result.get("isError")
 
         # Stop server
         await client.stop_server()
 
         # Verify it's stopped
-        assert client.process.poll() is not None  # Process should have exited
+        assert client.process.returncode is not None  # Process should have exited
 
     @pytest.mark.asyncio
-    async def test_tool_execution_isolation(self, minimal_environment):
+    async def test_tool_execution_isolation(self, seeded_jenkins_test_env):
         """Test that tool executions are properly isolated"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
-        async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Execute tools that might have side effects
             results = []
 
             for i in range(3):
                 result = await client.call_tool(
                     "trigger_build_async",
-                    {"job_name": "isolation-test", "params": {"TEST_ID": str(i)}},
+                    {
+                        "job_name": "isolation-test",
+                        "params": {"TEST_ID": str(i)},
+                        "jenkins_url": jenkins_url,
+                    },
                 )
                 results.append(result)
 
@@ -218,11 +217,12 @@ class TestInfrastructure:
                     assert data["job_name"] == "isolation-test"
 
     @pytest.mark.asyncio
-    async def test_large_response_handling(self, minimal_environment):
+    async def test_large_response_handling(self, seeded_jenkins_test_env):
         """Test handling of large responses"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
-        async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Request a potentially large response
             result = await client.call_tool(
                 "get_log_context",
@@ -231,32 +231,39 @@ class TestInfrastructure:
                     "build_number": 1,
                     "start_line": 0,
                     "end_line": 10000,  # Large range
+                    "jenkins_url": jenkins_url,
                 },
             )
 
             # Should handle large responses gracefully
-            assert "result" in result or "error" in result
-
-            # Response should be valid JSON-RPC
-            assert "jsonrpc" in result
-            assert "id" in result
+            if "result" in result:
+                log_data = result["result"]
+                assert isinstance(log_data, dict)
+            else:
+                assert "content" in result
+                assert "isError" in result
 
     @pytest.mark.asyncio
-    async def test_request_timeout_handling(self, minimal_environment):
+    async def test_request_timeout_handling(self, seeded_jenkins_test_env):
         """Test request timeout handling"""
-        config = minimal_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
-        async with MCPTestClient("jenkins_mcp_enterprise/server.py", config) as client:
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Test with very short timeout
             try:
                 result = await client.call_tool(
                     "diagnose_build_failure",
-                    {"job_name": "test-job", "build_number": 1},
+                    {
+                        "job_name": "test-job",
+                        "build_number": 1,
+                        "jenkins_url": jenkins_url,
+                    },
                     timeout=0.1,
                 )
 
                 # If it completes, that's fine
-                assert "result" in result or "error" in result
+                assert "result" in result or result.get("isError")
 
             except asyncio.TimeoutError:
                 # Timeout is also acceptable behavior

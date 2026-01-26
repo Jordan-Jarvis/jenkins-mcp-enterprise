@@ -20,43 +20,36 @@ class MCPTestClient:
     def __init__(
         self,
         server_script: str = "jenkins_mcp_enterprise.server",
-        config: Optional[Dict[str, Any]] = None,
+        config: Optional[Any] = None,
     ):
         self.server_script = server_script
-        self.config = config or {}
-        self.process: Optional[subprocess.Popen] = None
+        self.config = config
+        self.process: Optional[asyncio.subprocess.Process] = None
         self.request_id = 0
         self._reader_task = None
         self._responses = {}
         self._server_ready = False
 
+    @property
+    def server_ready(self) -> bool:
+        """Return True if the server is initialized and ready."""
+        return self._server_ready
+
     async def start_server(self) -> None:
         """Start the MCP server process"""
         env = os.environ.copy()
 
-        # Set test configuration via environment
-        for key, value in self.config.items():
-            if key == "jenkins_url":
-                env["JENKINS_URL"] = str(value)
-            elif key == "jenkins_user":
-                env["JENKINS_USER"] = str(value)  # Server expects JENKINS_USER
-            elif key == "jenkins_token":
-                env["JENKINS_TOKEN"] = str(value)
-            elif key == "cache_dir":
-                env["CACHE_DIR"] = str(value)
-            else:
-                # For other config values, use TEST_ prefix
-                env[f"TEST_{key.upper()}"] = str(value)
-
         # Disable vector search for testing
         env["DISABLE_VECTOR_SEARCH"] = "true"
 
-        # Set a cache directory for testing
-        if "CACHE_DIR" not in env:
-            env["CACHE_DIR"] = str(Path(tempfile.gettempdir()) / "mcp-jenkins-test")
-
-        # Start the server
+        # Start the server. If a config file path is provided in the config object,
+        # use it. Otherwise, let the server use its default.
         cmd = [sys.executable, "-m", self.server_script]
+        # The config object is now the DI container, which holds the config file path
+        if hasattr(self.config, "config_file_path") and self.config.config_file_path:
+            cmd.extend(["--config", str(self.config.config_file_path)])
+        elif isinstance(self.config, dict) and "config_file_path" in self.config:
+            cmd.extend(["--config", self.config["config_file_path"]])
         logger.info(f"Starting MCP server with command: {cmd}")
 
         self.process = await asyncio.create_subprocess_exec(
@@ -113,7 +106,14 @@ class MCPTestClient:
 
             await asyncio.sleep(0.1)
 
-        raise TimeoutError("Server failed to initialize within timeout")
+        # If timeout is reached, read stderr for debugging info
+        stderr = ""
+        if self.process and self.process.stderr:
+            stderr_data = await self.process.stderr.read()
+            if stderr_data:
+                stderr = stderr_data.decode("utf-8")
+        
+        raise TimeoutError(f"Server failed to initialize within timeout. Stderr: {stderr}")
 
     async def _read_responses(self):
         """Continuously read responses from the server"""

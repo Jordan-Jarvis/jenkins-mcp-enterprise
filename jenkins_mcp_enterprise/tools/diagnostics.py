@@ -318,9 +318,21 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
 
         # Step 5: Process build hierarchy and logs
         step_start = time.time()
-        self._process_build_analysis(params, build_info, result)
-        logger.info(f"TIMING: Step 5 (build analysis) took {time.time() - step_start:.2f}s")
-        
+        (
+            sub_builds,
+            error_analysis,
+            recommendations,
+            build_summary,
+        ) = self._process_build_analysis(params, build_info, result)
+        logger.info(
+            f"TIMING: Step 5 (build analysis) took {time.time() - step_start:.2f}s"
+        )
+
+        result["sub_builds"] = sub_builds
+        result["error_analysis"] = error_analysis
+        result["recommendations"] = recommendations
+        result["build_summary"] = build_summary
+
         total_time = time.time() - start_time
         logger.info(f"TIMING: Total diagnosis execution took {total_time:.2f}s")
 
@@ -451,9 +463,28 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
             return True
         return False
 
+    def _get_error_analysis(self, log_chunks: List) -> Dict[str, Any]:
+        """Analyzes log chunks to extract errors and semantic highlights."""
+        # Placeholder for error analysis logic
+        # In a real implementation, this would involve more sophisticated error detection
+        errors = []
+        for chunk in log_chunks:
+            if "ERROR" in chunk["content"]:
+                errors.append(
+                    {
+                        "match_text": chunk["content"],
+                        "line_number": chunk.get("line_number", 0),
+                    }
+                )
+
+        return {
+            "errors": errors,
+            "semantic_highlights": self._generate_semantic_highlights(log_chunks),
+        }
+
     def _process_build_analysis(
         self, params: Dict[str, Any], build: Build, result: Dict[str, Any]
-    ):
+    ) -> Tuple[List[Dict], Dict, List, str]:
         """Process the main build analysis including hierarchy and logs"""
         # Get jenkins client for sub-build discovery
         step_start = time.time()
@@ -500,25 +531,34 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
             logger.info(f"TIMING: Parallel log processing took {time.time() - step_start:.2f}s")
             # result["context_stats"]["chunks_analyzed"] = len(log_chunks)  # Removed for simplified output
 
-            # Generate analysis components
-            result["build_summary"] = self._generate_build_summary(
-                build, hierarchy_builds
+            # Generate build summary
+            step_start = time.time()
+            build_summary = self._generate_build_summary(build, hierarchy_builds)
+            logger.info(
+                f"TIMING: Generate build summary took {time.time() - step_start:.2f}s"
             )
-            result["recommendations"] = self._generate_recommendations(
+
+            # Generate recommendations
+            step_start = time.time()
+            recommendations = self._generate_recommendations(
                 hierarchy_builds, log_chunks
             )
-            
-            # Always include semantic highlights - fallback analysis when vector search disabled
-            result["semantic_search_highlights"] = self._generate_semantic_highlights(
-                log_chunks, self.vector_manager, build
+            logger.info(
+                f"TIMING: Generate recommendations took {time.time() - step_start:.2f}s"
             )
+
+            # Get error analysis
+            error_analysis = self._get_error_analysis(log_chunks)
 
             result["log_analysis_status"] = "COMPLETED"
 
+            return hierarchy_dicts, error_analysis, recommendations, build_summary
+
         except Exception as e:
-            result["log_analysis_status"] = "ERROR"
+            result["log_analysis_status"] = "FAILED"
             result["errors"].append(f"Log processing failed: {str(e)}")
-            logger.error(f"Log processing error: {e}")
+            logger.error(f"Log processing failed: {e}", exc_info=True)
+            return [], {}, [], ""
 
     def _generate_build_summary(self, root_build: Build, hierarchy: List[Build]) -> str:
         """Generate concise build summary"""
@@ -667,10 +707,10 @@ Primary Failure Points:
         return patterns
 
     def _generate_recommendations(
-        self, failure_hierarchy: List[Build], chunks: List
+        self, build: Build, hierarchy: List[Build], chunks: List
     ) -> List[str]:
         """Generate actionable recommendations based on failure patterns"""
-        failed_builds = [b for b in failure_hierarchy if b.status == "FAILURE"]
+        failed_builds = [b for b in hierarchy if b.status == "FAILURE"]
 
         if not failed_builds:
             return ["✅ No build failures detected in this pipeline"]
@@ -683,25 +723,37 @@ Primary Failure Points:
         all_content = " ".join([c.content.lower() for c in chunks[:max_content_chunks]])
         
         # Also try to get content from the main build's (first in hierarchy) cached log for comprehensive pattern matching
-        main_build = failure_hierarchy[0] if failure_hierarchy else None
-            
-        # If we have a main build, try to read its cached log for comprehensive pattern matching
-        if main_build:
-            # Use cache manager to get the correct path instead of hardcoding
+        main_build = hierarchy[0] if hierarchy else None
+        if not main_build:
+            return ["No build information available to generate recommendations."]
+
+        # For recommendations, we can just use the parent build
+        main_build = build
+        
+        try:
             cache_path = self.cache_manager.get_path(main_build)
-            try:
-                with open(cache_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    cached_log_content = f.read().lower()
-                    # Always use cached log content for pattern matching since it's comprehensive
-                    all_content = cached_log_content  
-            except Exception:
-                pass  # Continue with chunk content if cache read fails
+            with open(cache_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+        except FileNotFoundError:
+            return ["Log file not found, cannot generate recommendations."]
+        except Exception as e:
+            return [f"Error reading log file: {e}"]
 
         # Generate pattern-based recommendations using standard system
         recommendations = self._get_pattern_recommendations(all_content)
 
         # Add priority guidance
         priority_rec = self._get_priority_recommendation(failed_builds)
+        if priority_rec:
+            recommendations.insert(0, priority_rec)
+
+        # Add generic guidance if no specific recommendations found
+        if not recommendations:
+            recommendations.append(
+                "No specific failure patterns found. Review the build logs manually for more details."
+            )
+
+        return recommendations
         if priority_rec:
             recommendations.append(priority_rec)
 
@@ -798,22 +850,23 @@ Primary Failure Points:
         return False, {}
 
 
-    def _get_priority_recommendation(self, failed_builds: List[Build]) -> Optional[str]:
-        """Generate priority recommendation based on failed builds"""
-        priority_config = self.config.config.recommendations.priority_jobs
-        pattern = priority_config.get("app_pattern", "app")
-        max_builds = priority_config.get("max_priority_builds", 3)
-        message_template = priority_config.get("priority_message_template", "")
+    def _get_priority_recommendation(self, failed_builds: List[Dict]) -> Optional[str]:
+        """Get priority recommendation based on deepest failure"""
+        if not failed_builds:
+            return None
 
-        deepest_failures = [b for b in failed_builds if pattern in b.job_name]
+        # Find the deepest failure(s)
+        max_depth = max(b["depth"] for b in failed_builds)
+        deepest_failures = [b for b in failed_builds if b["depth"] == max_depth]
 
-        if deepest_failures:
-            app_builds = ", ".join(
-                [f"#{b.build_number}" for b in deepest_failures[:max_builds]]
-            )
-            return message_template.format(
-                job_pattern=pattern, build_numbers=app_builds
-            )
+        if len(deepest_failures) == 1:
+            failure = deepest_failures[0]
+            return f"🎯 **Priority**: Start with the deepest failure: '{failure['job_name']} #{failure['build_number']}'."
+        else:
+            failure_names = [
+                f"'{b['job_name']} #{b['build_number']}'" for b in deepest_failures
+            ]
+            return f"🎯 **Priority**: Investigate the deepest failures: {', '.join(failure_names)}."
 
         return None
 

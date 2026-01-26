@@ -1,11 +1,14 @@
 """End-to-end tool scenario testing"""
 
 import asyncio
+import json
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from .mcp_test_client import MCPTestClient
 from .test_doubles import JenkinsTestDouble, QdrantTestDouble
@@ -17,30 +20,6 @@ logger = logging.getLogger(__name__)
 
 class TestToolScenarios:
     """Test realistic tool usage scenarios"""
-
-    @pytest.fixture
-    async def test_environment(self):
-        """Setup complete test environment"""
-        # Start test doubles
-        jenkins = JenkinsTestDouble(port=18080)
-        qdrant = QdrantTestDouble(port=16333)
-
-        jenkins.start()
-        qdrant.start()
-
-        # Configure MCP client
-        config = {
-            "jenkins_url": "http://localhost:18080",
-            "jenkins_user": "test_user",
-            "jenkins_token": "test_token",
-            "cache_dir": "/tmp/test-mcp-jenkins",
-        }
-
-        yield {"config": config, "jenkins": jenkins, "qdrant": qdrant}
-
-        # Cleanup
-        jenkins.stop()
-        qdrant.stop()
 
     @pytest.fixture
     async def real_jenkins_config(self):
@@ -55,9 +34,9 @@ class TestToolScenarios:
         return config
 
     @pytest.mark.asyncio
-    async def test_list_tools(self, test_environment):
+    async def test_list_tools(self, seeded_jenkins_test_env):
         """Test that all tools are properly exposed via MCP"""
-        config = test_environment["config"]
+        config = seeded_jenkins_test_env.config
 
         async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             tools = await client.list_tools()
@@ -86,18 +65,21 @@ class TestToolScenarios:
                 assert "inputSchema" in tool
 
     @pytest.mark.asyncio
-    async def test_complete_build_workflow(self, test_environment):
+    async def test_complete_build_workflow(self, seeded_jenkins_test_env):
         """Test complete workflow: trigger → wait → get logs → analyze"""
-        config = test_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
         async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # 1. Get job parameters first
             params_result = await client.call_tool(
-                "get_jenkins_job_parameters", {"job_name": "sample-job"}
+                "get_jenkins_job_parameters",
+                {"job_name": "sample-job", "jenkins_url": jenkins_url},
             )
 
-            assert params_result["success"] is True
-            params = params_result["data"]
+            assert "content" in params_result, f"Tool call failed: {params_result.get('content')}"
+            params_data = json.loads(params_result["content"][0]["text"])
+            params = params_data.get("parameters", [])
             assert len(params) == 2  # BRANCH and DEPLOY_ENV
             assert params[0]["name"] == "BRANCH"
             assert params[1]["name"] == "DEPLOY_ENV"
@@ -109,12 +91,16 @@ class TestToolScenarios:
                     "job_name": "sample-job",
                     "params": {"BRANCH": "main", "DEPLOY_ENV": "dev"},
                     "build_complete_timeout": 5,
+                    "jenkins_url": jenkins_url,
                 },
             )
 
-            assert trigger_result["success"] is True
-            assert "build_number" in trigger_result["data"]
-            build_number = trigger_result["data"]["build_number"]
+            if trigger_result.get("isError"):
+                pytest.fail(f"Tool call failed: {trigger_result.get('content')}")
+            assert "content" in trigger_result, f"Tool call failed: {trigger_result.get('content')}"
+            trigger_data = json.loads(trigger_result["content"][0]["text"])
+            assert "build_number" in trigger_data
+            build_number = trigger_data["build_number"]
 
             # 3. Get log context
             log_result = await client.call_tool(
@@ -124,12 +110,14 @@ class TestToolScenarios:
                     "build_number": build_number,
                     "start_line": 0,
                     "end_line": 10,
+                    "jenkins_url": jenkins_url,
                 },
             )
 
-            assert log_result["success"] is True
-            assert "lines" in log_result["data"]
-            assert len(log_result["data"]["lines"]) > 0
+            assert "content" in log_result, f"Tool call failed: {log_result.get('content')}"
+            log_data = json.loads(log_result["content"][0]["text"])
+            assert "lines" in log_data
+            assert len(log_data["lines"]) > 0
 
             # 4. Search for errors (should find none in success case)
             error_result = await client.call_tool(
@@ -138,40 +126,51 @@ class TestToolScenarios:
                     "job_name": "sample-job",
                     "build_number": build_number,
                     "pattern": "ERROR|FAILED|Exception",
+                    "jenkins_url": jenkins_url,
                 },
             )
 
-            assert error_result["success"] is True
+            assert "content" in error_result, f"Tool call failed: {error_result.get('content')}"
+            error_data = json.loads(error_result["content"][0]["text"])
             # Should find no errors in successful build
-            assert len(error_result["data"]) == 0
+            assert len(error_data.get("error_blocks", [])) == 0
 
     @pytest.mark.asyncio
-    async def test_build_failure_diagnosis(self, test_environment):
+    async def test_build_failure_diagnosis(self, seeded_jenkins_test_env):
         """Test failure diagnosis workflow"""
-        config = test_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
         async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Diagnose the failed master  build
             diagnose_result = await client.call_tool(
                 "diagnose_build_failure",
-                {"job_name": "QA_JOBS/master", "build_number": 9},
+                {
+                    "job_name": "QA_JOBS/master",
+                    "build_number": 9,
+                    "jenkins_url": jenkins_url,
+                },
             )
 
-            assert diagnose_result["success"] is True
-            data = diagnose_result["data"]
+            assert "content" in diagnose_result, f"Tool call failed: {diagnose_result.get('content')}"
+            data = json.loads(diagnose_result["content"][0]["text"])
 
             # Verify diagnosis contains expected elements
-            assert "build_status" in data
-            assert data["build_status"]["result"] == "FAILURE"
+            assert "build_summary" in data
+            assert "FAILURE" in data["build_summary"]
 
+            assert "sub_builds" in data
+            assert len(data["sub_builds"]) > 0
             assert "error_analysis" in data
             assert "errors" in data["error_analysis"]
             assert len(data["error_analysis"]["errors"]) > 0
+            assert "recommendations" in data
+            assert len(data["recommendations"]) > 0
 
             # Should find ERROR messages in the failed build
             error_found = False
             for error in data["error_analysis"]["errors"]:
-                if "ERROR" in error["text"]:
+                if "ERROR" in error["match_text"]:
                     error_found = True
                     break
             assert error_found, "Should find ERROR in failed build"
@@ -179,37 +178,50 @@ class TestToolScenarios:
             assert "recommendations" in data
             assert len(data["recommendations"]) > 0
 
+
     @pytest.mark.asyncio
-    async def test_async_build_trigger(self, test_environment):
+    async def test_async_build_trigger(self, seeded_jenkins_test_env):
         """Test async build triggering"""
-        config = test_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
         async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             result = await client.call_tool(
                 "trigger_build_async",
-                {"job_name": "sample-job", "params": {"BRANCH": "feature-branch"}},
+                {
+                    "job_name": "sample-job",
+                    "params": {"BRANCH": "feature-branch"},
+                    "jenkins_url": jenkins_url,
+                },
             )
 
-            assert result["success"] is True
-            data = result["data"]
+            assert "content" in result, f"Tool call failed: {result.get('content')}"
+            data = json.loads(result["content"][0]["text"])
             assert "build_number" in data
             assert "url" in data
             assert "estimated_cache_path" in data
-            assert data["estimated_cache_path"].endswith(f"{data['build_number']}.log")
+            assert data["estimated_cache_path"].endswith(
+                f"{data['build_number']}/console.log"
+            )
 
     @pytest.mark.asyncio
-    async def test_sub_build_traversal(self, test_environment):
+    async def test_sub_build_traversal(self, seeded_jenkins_test_env):
         """Test sub-build discovery and traversal"""
-        config = test_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
         async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             result = await client.call_tool(
                 "trigger_build_with_subs",
-                {"parent_job_name": "QA_JOBS/master", "parent_build_number": 9},
+                {
+                    "parent_job_name": "QA_JOBS/master",
+                    "parent_build_number": 9,
+                    "jenkins_url": jenkins_url,
+                },
             )
 
-            assert result["success"] is True
-            data = result["data"]
+            assert "content" in result, f"Tool call failed: {result.get('content')}"
+            data = json.loads(result["content"][0]["text"])
 
             assert "parent_build" in data
             assert data["parent_build"]["job_name"] == "QA_JOBS/master"
@@ -230,9 +242,10 @@ class TestToolScenarios:
                 assert "depth" in sub_build
 
     @pytest.mark.asyncio
-    async def test_grep_pattern_search(self, test_environment):
+    async def test_grep_pattern_search(self, seeded_jenkins_test_env):
         """Test grep pattern search on logs"""
-        config = test_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
         async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Search for compilation errors in failed build
@@ -242,20 +255,22 @@ class TestToolScenarios:
                     "job_name": "QA_JOBS/master",
                     "build_number": 9,
                     "pattern": "ERROR.*failure",
+                    "jenkins_url": jenkins_url,
                 },
             )
 
-            assert result["success"] is True
-            errors = result["data"]
+            assert "content" in result, f"Tool call failed: {result.get('content')}"
+            error_data = json.loads(result["content"][0]["text"])
+            errors = error_data.get("error_blocks", [])
 
             # Should find errors in the failed build
             assert len(errors) > 0
 
             # Verify error structure
             for error in errors:
-                assert "line_number" in error
-                assert "text" in error
-                assert "ERROR" in error["text"]
+                assert "match_line" in error
+                assert "match_text" in error
+                assert "ERROR" in error["match_text"]
 
     @pytest.mark.asyncio
     @pytest.mark.skip(reason="Requires real Jenkins instance")
@@ -276,29 +291,32 @@ class TestToolScenarios:
                     "build_number": 9,
                     "start_line": 0,
                     "end_line": 20,
+                    "jenkins_url": real_jenkins_config["jenkins_url"],
                 },
             )
 
-            if result["success"]:
-                assert "lines" in result["data"]
+            if not result.get("isError"):
+                assert "lines" in result["result"]
                 logger.info(
-                    f"Successfully retrieved {len(result['data']['lines'])} lines from real Jenkins"
+                    f"Successfully retrieved {len(result['result']['lines'])} lines from real Jenkins"
                 )
             else:
                 logger.warning(
-                    f"Could not connect to real Jenkins: {result.get('error_message', 'Unknown error')}"
+                    f"Could not connect to real Jenkins: {result.get('content', 'Unknown error')}"
                 )
 
     @pytest.mark.asyncio
-    async def test_concurrent_tool_calls(self, test_environment):
+    async def test_concurrent_tool_calls(self, seeded_jenkins_test_env):
         """Test that multiple tools can be called concurrently"""
-        config = test_environment["config"]
+        config = seeded_jenkins_test_env.config
+        jenkins_url = config["jenkins"]["url"]
 
         async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
             # Execute multiple tool calls concurrently
             tasks = [
                 client.call_tool(
-                    "get_jenkins_job_parameters", {"job_name": "sample-job"}
+                    "get_jenkins_job_parameters",
+                    {"job_name": "sample-job", "jenkins_url": jenkins_url},
                 ),
                 client.call_tool(
                     "get_log_context",
@@ -307,6 +325,7 @@ class TestToolScenarios:
                         "build_number": 1,
                         "start_line": 0,
                         "end_line": 5,
+                        "jenkins_url": jenkins_url,
                     },
                 ),
                 client.call_tool(
@@ -315,6 +334,7 @@ class TestToolScenarios:
                         "job_name": "QA_JOBS/master",
                         "build_number": 9,
                         "pattern": "ERROR",
+                        "jenkins_url": jenkins_url,
                     },
                 ),
             ]
@@ -326,6 +346,6 @@ class TestToolScenarios:
                 assert not isinstance(
                     result, Exception
                 ), f"Task {i} raised exception: {result}"
-                assert (
-                    result["success"] is True
-                ), f"Task {i} failed: {result.get('error_message', 'Unknown error')}"
+                assert not result.get(
+                    "isError"
+                ), f"Task {i} failed: {result.get('content', 'Unknown error')}"
