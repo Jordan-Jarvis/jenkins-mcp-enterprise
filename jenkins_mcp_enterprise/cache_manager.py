@@ -39,19 +39,21 @@ class CacheManager:
             vector_manager: Optional vector manager for automatic indexing
         """
         self.config = config
-        
+
         # Generate unique instance UUID for multiple instance support
         self.instance_uuid = str(uuid.uuid4())[:8]  # Use short UUID for readability
-        
+
         # Create instance-specific cache directory to avoid conflicts
         self.cache_dir = config.base_dir / f"instance-{self.instance_uuid}"
-        
+
         self.max_size_mb = config.max_size_mb
         self.retention_days = config.retention_days
         self.enable_compression = config.enable_compression
         self.vector_manager = vector_manager
 
-        logger.info(f"Cache manager initialized with instance UUID: {self.instance_uuid}")
+        logger.info(
+            f"Cache manager initialized with instance UUID: {self.instance_uuid}"
+        )
         logger.info(f"Cache directory: {self.cache_dir}")
 
         # Ensure cache directory exists
@@ -83,17 +85,17 @@ class CacheManager:
             The Path to the cached console log file.
         """
         log_path = self.get_path(build)
-        lock_path = log_path.with_suffix('.lock')
-        
+        lock_path = log_path.with_suffix(".lock")
+
         # Check if file already exists (quick check before locking)
         if log_path.exists():
             return log_path
-        
+
         # Use file locking for concurrent access safety
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         try:
-            with open(lock_path, 'w') as lock_file:
+            with open(lock_path, "w") as lock_file:
                 # Try to acquire exclusive lock with timeout
                 for attempt in range(10):  # Max 10 seconds wait
                     try:
@@ -101,15 +103,17 @@ class CacheManager:
                         break
                     except IOError:
                         if attempt == 9:  # Last attempt
-                            logger.warning(f"Could not acquire lock for {build.job_name} #{build.build_number} after 10s")
+                            logger.warning(
+                                f"Could not acquire lock for {build.job_name} #{build.build_number} after 10s"
+                            )
                             # Proceed without lock as fallback
                             break
                         time.sleep(1)
-                
+
                 # Double-check if file was created by another process while we waited
                 if log_path.exists():
                     return log_path
-                
+
                 # Fetch and process the log
                 logger.info(f"Fetching log for {build.job_name} #{build.build_number}")
                 raw_console_text = client.get_console_text(
@@ -119,12 +123,12 @@ class CacheManager:
                 # Store raw logs - timestamp processing moved to analysis phase for better performance
                 processed_console_text = raw_console_text
 
-                log_path.write_text(
-                    processed_console_text, encoding="utf-8"
-                )
+                log_path.write_text(processed_console_text, encoding="utf-8")
 
                 # Automatically index the log for vector search if available and enabled
-                if self.vector_manager and not getattr(self.vector_manager, 'vector_search_disabled', True):
+                if self.vector_manager and not getattr(
+                    self.vector_manager, "vector_search_disabled", True
+                ):
                     try:
                         logger.info(
                             f"Auto-indexing log for vector search: {build.job_name} #{build.build_number}"
@@ -134,7 +138,9 @@ class CacheManager:
                             f"Successfully indexed log: {build.job_name} #{build.build_number}"
                         )
                     except Exception as e:
-                        logger.warning(f"Failed to auto-index log for vector search: {e}")
+                        logger.warning(
+                            f"Failed to auto-index log for vector search: {e}"
+                        )
 
         finally:
             # Clean up lock file

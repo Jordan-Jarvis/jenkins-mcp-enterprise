@@ -77,7 +77,9 @@ class TestToolScenarios:
                 {"job_name": "sample-job", "jenkins_url": jenkins_url},
             )
 
-            assert "content" in params_result, f"Tool call failed: {params_result.get('content')}"
+            assert (
+                "content" in params_result
+            ), f"Tool call failed: {params_result.get('content')}"
             params_data = json.loads(params_result["content"][0]["text"])
             params = params_data.get("parameters", [])
             assert len(params) == 2  # BRANCH and DEPLOY_ENV
@@ -97,7 +99,9 @@ class TestToolScenarios:
 
             if trigger_result.get("isError"):
                 pytest.fail(f"Tool call failed: {trigger_result.get('content')}")
-            assert "content" in trigger_result, f"Tool call failed: {trigger_result.get('content')}"
+            assert (
+                "content" in trigger_result
+            ), f"Tool call failed: {trigger_result.get('content')}"
             trigger_data = json.loads(trigger_result["content"][0]["text"])
             assert "build_number" in trigger_data
             build_number = trigger_data["build_number"]
@@ -114,7 +118,9 @@ class TestToolScenarios:
                 },
             )
 
-            assert "content" in log_result, f"Tool call failed: {log_result.get('content')}"
+            assert (
+                "content" in log_result
+            ), f"Tool call failed: {log_result.get('content')}"
             log_data = json.loads(log_result["content"][0]["text"])
             assert "lines" in log_data
             assert len(log_data["lines"]) > 0
@@ -130,7 +136,9 @@ class TestToolScenarios:
                 },
             )
 
-            assert "content" in error_result, f"Tool call failed: {error_result.get('content')}"
+            assert (
+                "content" in error_result
+            ), f"Tool call failed: {error_result.get('content')}"
             error_data = json.loads(error_result["content"][0]["text"])
             # Should find no errors in successful build
             assert len(error_data.get("error_blocks", [])) == 0
@@ -152,7 +160,9 @@ class TestToolScenarios:
                 },
             )
 
-            assert "content" in diagnose_result, f"Tool call failed: {diagnose_result.get('content')}"
+            assert (
+                "content" in diagnose_result
+            ), f"Tool call failed: {diagnose_result.get('content')}"
             data = json.loads(diagnose_result["content"][0]["text"])
 
             # Verify diagnosis contains expected elements
@@ -170,7 +180,8 @@ class TestToolScenarios:
             # Error analysis should focus on the failing sub-build (not the root job)
             # when skip_successful_builds is true (default).
             assert all(
-                e.get("job_name") != "QA_JOBS/master" for e in data["error_analysis"]["errors"]
+                e.get("job_name") != "QA_JOBS/master"
+                for e in data["error_analysis"]["errors"]
             )
 
             # Should find ERROR messages in the failed build
@@ -192,7 +203,9 @@ class TestToolScenarios:
             assert len(data["recommendations"]) > 0
 
     @pytest.mark.asyncio
-    async def test_diagnose_prunes_passing_branches_by_default(self, seeded_jenkins_test_env):
+    async def test_diagnose_prunes_passing_branches_by_default(
+        self, seeded_jenkins_test_env
+    ):
         """By default (skip_successful_builds=True), only show paths leading to failures."""
         config = seeded_jenkins_test_env.config
         jenkins_url = config["jenkins"]["url"]
@@ -220,7 +233,9 @@ class TestToolScenarios:
             assert "QA_JOBS/sub-build-2" in names
 
     @pytest.mark.asyncio
-    async def test_diagnose_includes_all_branches_when_skip_disabled(self, seeded_jenkins_test_env):
+    async def test_diagnose_includes_all_branches_when_skip_disabled(
+        self, seeded_jenkins_test_env
+    ):
         """When skip_successful_builds=False, the full tree (including passing branches) is shown."""
         config = seeded_jenkins_test_env.config
         jenkins_url = config["jenkins"]["url"]
@@ -242,7 +257,6 @@ class TestToolScenarios:
             names = [b.get("job_name") for b in data.get("sub_builds", [])]
             assert "QA_JOBS/sub-build-1" in names
             assert "QA_JOBS/sub-build-2" in names
-
 
     @pytest.mark.asyncio
     async def test_async_build_trigger(self, seeded_jenkins_test_env):

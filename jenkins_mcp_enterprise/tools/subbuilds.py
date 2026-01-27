@@ -117,7 +117,12 @@ class SubBuildTraversalTool(JenkinsOperationTool):
 
             # Keep pipeline-stage heuristic for now (tree discovery can surface stage-like nodes)
             is_pipeline_stage = self._is_pipeline_stage(
-                SubBuild(job_name=job_name, build_number=build_number, url=node.get("url"), status=node.get("status")),
+                SubBuild(
+                    job_name=job_name,
+                    build_number=build_number,
+                    url=node.get("url"),
+                    status=node.get("status"),
+                ),
                 parent_job_name,
             )
 

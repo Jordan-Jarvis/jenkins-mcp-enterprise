@@ -166,7 +166,7 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
                 build_tree["url"] = current_build.url
 
             # Add common annotations (depth/parent/failed)
-            status_config = (self.config.config.display.get("status_display", {}) or {})
+            status_config = self.config.config.display.get("status_display", {}) or {}
 
             annotate_build_tree(
                 build_tree,
@@ -241,23 +241,29 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
     def _execute_impl(self, **kwargs) -> Dict[str, Any]:
         """Execute build failure diagnosis with improved structure"""
         start_time = time.time()
-        
+
         # Step 1: Parse and normalize inputs
         step_start = time.time()
         params = self._parse_and_normalize_inputs(kwargs)
-        logger.info(f"TIMING: Step 1 (parse inputs) took {time.time() - step_start:.2f}s")
+        logger.info(
+            f"TIMING: Step 1 (parse inputs) took {time.time() - step_start:.2f}s"
+        )
         if "error" in params:
             return params
 
         # Step 2: Initialize result structure
         step_start = time.time()
         result = self._initialize_result_structure(params)
-        logger.info(f"TIMING: Step 2 (initialize result) took {time.time() - step_start:.2f}s")
+        logger.info(
+            f"TIMING: Step 2 (initialize result) took {time.time() - step_start:.2f}s"
+        )
 
         # Step 3: Get build information
         step_start = time.time()
         build_info = self._get_build_information(params, result)
-        logger.info(f"TIMING: Step 3 (get build info) took {time.time() - step_start:.2f}s")
+        logger.info(
+            f"TIMING: Step 3 (get build info) took {time.time() - step_start:.2f}s"
+        )
         if build_info is None:
             return result
 
@@ -266,7 +272,9 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
         if self._should_skip_build(
             build_info, params["skip_successful_builds"], result
         ):
-            logger.info(f"TIMING: Step 4 (check skip) took {time.time() - step_start:.2f}s")
+            logger.info(
+                f"TIMING: Step 4 (check skip) took {time.time() - step_start:.2f}s"
+            )
             return result
         logger.info(f"TIMING: Step 4 (check skip) took {time.time() - step_start:.2f}s")
 
@@ -417,7 +425,9 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
             return True
         return False
 
-    def _get_error_analysis(self, log_chunks: List, root_build: Build) -> Dict[str, Any]:
+    def _get_error_analysis(
+        self, log_chunks: List, root_build: Build
+    ) -> Dict[str, Any]:
         """Analyze processed log chunks to extract errors and semantic highlights.
 
         Critical: this method must NEVER return huge blobs of log content.
@@ -447,7 +457,11 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
         max_context_chars = int(
             error_cfg.get(
                 "max_error_context_chars",
-                (getattr(ctx_cfg, "max_tokens_per_chunk", 500) * 4) if ctx_cfg else 2000,
+                (
+                    (getattr(ctx_cfg, "max_tokens_per_chunk", 500) * 4)
+                    if ctx_cfg
+                    else 2000
+                ),
             )
         )
         context_window = int(error_cfg.get("context_window_lines", 5))
@@ -467,7 +481,7 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
         # because some processors/test logs emit error markers like "[ERROR]" while
         # classifying the chunk as INFO.
         def _chunk_has_error_line(c) -> bool:
-            content = (getattr(c, "content", "") or "")
+            content = getattr(c, "content", "") or ""
             return bool(content and error_line_pattern.search(content))
 
         candidate_chunks = [c for c in log_chunks if _chunk_has_error_line(c)]
@@ -488,7 +502,7 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
             if len(errors) >= max_error_entries:
                 break
 
-            content = (getattr(chunk, "content", "") or "")
+            content = getattr(chunk, "content", "") or ""
             if not content:
                 continue
 
@@ -540,7 +554,9 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
 
         return {
             "errors": errors,
-            "semantic_highlights": self._generate_semantic_highlights(log_chunks, root_build),
+            "semantic_highlights": self._generate_semantic_highlights(
+                log_chunks, root_build
+            ),
         }
 
     def _process_build_analysis(
@@ -572,7 +588,7 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
                 return
             n.pop("parent_job_name", None)
             n.pop("parent_build_number", None)
-            for c in (n.get("children", []) or []):
+            for c in n.get("children", []) or []:
                 if isinstance(c, dict):
                     _strip_parent_fields(c)
 
@@ -606,7 +622,9 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
             log_processor._vector_search_disabled = getattr(
                 self.vector_manager, "vector_search_disabled", True
             )
-            logger.info(f"TIMING: Create log processor took {time.time() - step_start:.2f}s")
+            logger.info(
+                f"TIMING: Create log processor took {time.time() - step_start:.2f}s"
+            )
 
             step_start = time.time()
             log_chunks = self._process_logs_parallel_sync(
@@ -616,7 +634,9 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
                 params["skip_successful_builds"],
                 result,
             )
-            logger.info(f"TIMING: Parallel log processing took {time.time() - step_start:.2f}s")
+            logger.info(
+                f"TIMING: Parallel log processing took {time.time() - step_start:.2f}s"
+            )
 
             # Generate build summary
             step_start = time.time()
@@ -719,12 +739,16 @@ Primary Failure Points:
 
     # _generate_hierarchy_data removed - functionality integrated into sub_build_information.builds
 
-    def _generate_semantic_highlights(self, chunks: List, root_build: Build) -> List[str]:
+    def _generate_semantic_highlights(
+        self, chunks: List, root_build: Build
+    ) -> List[str]:
         """Generate semantic search highlights (or fall back to pattern extraction)."""
         highlights: List[str] = []
 
         vector_manager = self.vector_manager
-        if not vector_manager or getattr(vector_manager, "vector_search_disabled", True):
+        if not vector_manager or getattr(
+            vector_manager, "vector_search_disabled", True
+        ):
             return self._extract_key_failure_patterns(chunks)
 
         try:
@@ -746,11 +770,17 @@ Primary Failure Points:
                             and len(content)
                             > self.config.config.semantic_search.min_content_length
                         ):
-                            job_name = result.get("payload", {}).get("job_name", "unknown")
-                            build_num = result.get("payload", {}).get("build_number", "unknown")
+                            job_name = result.get("payload", {}).get(
+                                "job_name", "unknown"
+                            )
+                            build_num = result.get("payload", {}).get(
+                                "build_number", "unknown"
+                            )
                             score = result.get("score", 0)
 
-                            preview_length = self.config.config.semantic_search.max_content_preview
+                            preview_length = (
+                                self.config.config.semantic_search.max_content_preview
+                            )
                             highlight = (
                                 f"🔍 {job_name} #{build_num} (relevance: {score:.2f})\n"
                                 f"{content[:preview_length]}..."
@@ -778,43 +808,65 @@ Primary Failure Points:
         failure_patterns = self.config.get_failure_patterns()
         max_patterns = self.config.config.failure_patterns.max_fallback_patterns
         max_preview = self.config.config.failure_patterns.max_pattern_preview
-        
+
         # Score and rank chunks based on failure patterns only
         scored_chunks = []
-        for chunk in chunks[:max_chunks * 2]:  # Analyze more chunks for better results
+        for chunk in chunks[: max_chunks * 2]:  # Analyze more chunks for better results
             content = chunk.content.lower()
             score = 0
             matched_patterns = []
-            
+
             # Score based on failure patterns
             for pattern in failure_patterns:
                 if pattern.lower() in content:
                     score += 2
                     matched_patterns.append(pattern)
-            
+
             # Boost score for stack traces, exceptions, and error codes
-            if any(indicator in content for indicator in ['exception', 'error', 'failed', 'stack trace', 'at java.', 'caused by']):
+            if any(
+                indicator in content
+                for indicator in [
+                    "exception",
+                    "error",
+                    "failed",
+                    "stack trace",
+                    "at java.",
+                    "caused by",
+                ]
+            ):
                 score += 3
-                
+
             # Boost score for build-specific failures
-            if any(build_term in content for build_term in ['build failed', 'compilation error', 'test failed', 'timeout']):
+            if any(
+                build_term in content
+                for build_term in [
+                    "build failed",
+                    "compilation error",
+                    "test failed",
+                    "timeout",
+                ]
+            ):
                 score += 2
-            
+
             if score > 0:
                 scored_chunks.append((score, chunk, matched_patterns))
-        
+
         # Sort by score (highest first) and take the best ones
         scored_chunks.sort(key=lambda x: x[0], reverse=True)
-        
+
         for score, chunk, matched_patterns in scored_chunks[:max_patterns]:
             # Create pattern description with relevance info
             relevance_info = f"relevance: {score:.1f}"
-            pattern_info = f"patterns: {', '.join(set(matched_patterns[:3]))}" if matched_patterns else ""
-            
+            pattern_info = (
+                f"patterns: {', '.join(set(matched_patterns[:3]))}"
+                if matched_patterns
+                else ""
+            )
+
             pattern = f"🔍 {chunk.build.job_name} #{chunk.build.build_number} ({relevance_info})\n{chunk.content[:max_preview]}..."
             if pattern_info:
                 pattern += f"\n📋 {pattern_info}"
-            
+
             patterns.append(pattern)
 
         return patterns
@@ -883,10 +935,12 @@ Primary Failure Points:
         """Extract recommendations with regex capture group interpolation"""
         recommendations = []
         pattern_configs = self.config.get_pattern_recommendations()
-        
+
         for pattern_name, pattern_config in pattern_configs.items():
-            matches, captured_groups = self._matches_pattern_conditions(content, pattern_config.conditions)
-            
+            matches, captured_groups = self._matches_pattern_conditions(
+                content, pattern_config.conditions
+            )
+
             if matches:
                 # Use interpolated message from condition if available
                 if "_interpolated_message" in captured_groups:
@@ -895,77 +949,91 @@ Primary Failure Points:
                         recommendations.append(captured_groups["_interpolated_message"])
                 elif captured_groups and "{" in pattern_config.message:
                     # Interpolate the main message with captured groups
-                    interpolated_message = pattern_config.message.format(**captured_groups)
+                    interpolated_message = pattern_config.message.format(
+                        **captured_groups
+                    )
                     if interpolated_message.strip():
                         recommendations.append(interpolated_message)
                 else:
                     # No interpolation needed or possible
                     if pattern_config.message.strip():
                         recommendations.append(pattern_config.message)
-        
+
         return recommendations
 
-    def _matches_pattern_conditions(self, content: str, conditions: List) -> Tuple[bool, Dict[str, str]]:
+    def _matches_pattern_conditions(
+        self, content: str, conditions: List
+    ) -> Tuple[bool, Dict[str, str]]:
         """
         Enhanced pattern matching with regex capture group support
-        
+
         Args:
             content: The content to match against
             conditions: List of conditions (strings, lists, or regex dicts)
-        
+
         Returns:
             Tuple of (matches: bool, captured_groups: Dict[str, str])
         """
         all_captured_groups = {}
-        
+
         for condition in conditions:
             if isinstance(condition, str):
                 # Backward compatible: simple string condition
                 if condition.lower() in content.lower():
                     return True, {}
-                    
+
             elif isinstance(condition, list):
                 # Backward compatible: OR condition
                 if any(cond.lower() in content.lower() for cond in condition):
                     return True, {}
-                    
+
             elif isinstance(condition, dict) and condition.get("type") == "regex":
                 # New: regex with capture groups
                 pattern = condition["pattern"]
                 flags = condition.get("flags", re.IGNORECASE)
-                
+
                 try:
                     compiled_pattern = re.compile(pattern, flags)
                     match = compiled_pattern.search(content)
-                    
+
                     if match:
                         # Capture named groups
                         captured_groups = match.groupdict()
-                        
+
                         # Capture numbered groups if no named groups
                         if not captured_groups and match.groups():
-                            captured_groups = {f"group_{i}": group or "" for i, group in enumerate(match.groups(), 1)}
-                        
+                            captured_groups = {
+                                f"group_{i}": group or ""
+                                for i, group in enumerate(match.groups(), 1)
+                            }
+
                         all_captured_groups.update(captured_groups)
-                        
+
                         # If this condition has a message template, store it for later use
                         if condition.get("message_template"):
                             try:
-                                interpolated = condition["message_template"].format(**captured_groups)
-                                all_captured_groups["_interpolated_message"] = interpolated
+                                interpolated = condition["message_template"].format(
+                                    **captured_groups
+                                )
+                                all_captured_groups["_interpolated_message"] = (
+                                    interpolated
+                                )
                             except KeyError as e:
-                                logger.warning(f"Failed to interpolate message template: missing key {e}")
+                                logger.warning(
+                                    f"Failed to interpolate message template: missing key {e}"
+                                )
                             except Exception as e:
-                                logger.warning(f"Failed to interpolate message template: {e}")
-                        
+                                logger.warning(
+                                    f"Failed to interpolate message template: {e}"
+                                )
+
                         return True, all_captured_groups
-                        
+
                 except re.error as e:
                     logger.error(f"Invalid regex pattern '{pattern}': {e}")
                     continue
-        
-        return False, {}
 
+        return False, {}
 
     def _get_priority_recommendation(self, failed_builds: List[Dict]) -> Optional[str]:
         """Get priority recommendation based on deepest failure"""
@@ -1051,7 +1119,7 @@ Primary Failure Points:
         logger.info(
             f"Parallel processing completed: {len(all_chunks)} total chunks from {len(builds_to_process)} builds"
         )
-        
+
         # Force garbage collection after processing large builds to prevent memory accumulation
         if len(builds_to_process) > 3 or len(all_chunks) > 1000:
             logger.info("Running garbage collection after large build processing")
@@ -1075,7 +1143,9 @@ Primary Failure Points:
             try:
                 cache_start = time.time()
                 log_path = self.cache_manager.fetch(jenkins_client, build)
-                logger.info(f"TIMING: Cache fetch for {build.job_name}#{build.build_number} took {time.time() - cache_start:.2f}s")
+                logger.info(
+                    f"TIMING: Cache fetch for {build.job_name}#{build.build_number} took {time.time() - cache_start:.2f}s"
+                )
 
                 # Check if cached file exists and is not empty
                 if log_path.exists() and log_path.stat().st_size > 0:
@@ -1093,7 +1163,9 @@ Primary Failure Points:
                     log_path = self.cache_manager.fetch(jenkins_client, build)
                     file_handle = open(log_path, "r", errors="ignore")
 
-                logger.info(f"Starting chunk processing for {build.job_name}#{build.build_number}")
+                logger.info(
+                    f"Starting chunk processing for {build.job_name}#{build.build_number}"
+                )
                 processing_start = time.time()
 
             except Exception as cache_e:
@@ -1107,27 +1179,33 @@ Primary Failure Points:
             try:
                 # Process chunks as generator to avoid loading all into memory
                 # Apply chunk limits to prevent memory accumulation
-                max_chunks = self.config.config.build_processing.chunks.get("max_chunks_for_content", 1000)
+                max_chunks = self.config.config.build_processing.chunks.get(
+                    "max_chunks_for_content", 1000
+                )
                 chunk_count = 0
-                
+
                 for chunk in processor.process_streaming(file_handle, build):
                     if chunk_count >= max_chunks:
-                        logger.info(f"Reached max chunk limit ({max_chunks}) for {build.job_name}#{build.build_number}")
+                        logger.info(
+                            f"Reached max chunk limit ({max_chunks}) for {build.job_name}#{build.build_number}"
+                        )
                         break
                     chunks.append(chunk)
                     chunk_count += 1
-                    
+
                     # Log progress every 100 chunks to detect hangs
                     if chunk_count % 100 == 0:
                         elapsed = time.time() - processing_start
-                        logger.info(f"Progress: {chunk_count} chunks processed in {elapsed:.1f}s for {build.job_name}#{build.build_number}")
-                    
+                        logger.info(
+                            f"Progress: {chunk_count} chunks processed in {elapsed:.1f}s for {build.job_name}#{build.build_number}"
+                        )
+
                 logger.info(
                     f"Processed {chunk_count} chunks from {build.job_name}#{build.build_number} in {time.time() - processing_start:.1f}s"
                 )
             finally:
                 # Ensure file handle is always closed
-                if 'file_handle' in locals():
+                if "file_handle" in locals():
                     file_handle.close()
 
         except Exception as e:

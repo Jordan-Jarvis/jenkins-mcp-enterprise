@@ -47,7 +47,7 @@ class RegexCondition:
     message_template: Optional[str] = None
     flags: int = re.IGNORECASE
     compiled_pattern: Optional[re.Pattern] = field(default=None, init=False, repr=False)
-    
+
     def __post_init__(self):
         """Compile the regex pattern for efficiency and validate syntax"""
         try:
@@ -56,44 +56,50 @@ class RegexCondition:
         except re.error as e:
             logger.error(f"Invalid regex pattern '{self.pattern}': {e}")
             raise ValueError(f"Invalid regex pattern '{self.pattern}': {e}")
-    
+
     def match(self, content: str) -> Optional[re.Match]:
         """Match the pattern against content and return match object"""
         if self.compiled_pattern is None:
             return None
         return self.compiled_pattern.search(content)
-    
+
     def extract_groups(self, content: str) -> Dict[str, str]:
         """Extract named and numbered capture groups from content"""
         match = self.match(content)
         if not match:
             return {}
-        
+
         # Get named groups first
         captured_groups = match.groupdict()
-        
+
         # Add numbered groups if no named groups exist
         if not captured_groups and match.groups():
-            captured_groups = {f"group_{i}": group or "" for i, group in enumerate(match.groups(), 1)}
-        
+            captured_groups = {
+                f"group_{i}": group or "" for i, group in enumerate(match.groups(), 1)
+            }
+
         return captured_groups
-    
+
     def interpolate_message(self, content: str) -> Optional[str]:
         """Interpolate message template with captured groups from content"""
         if not self.message_template:
             return None
-        
+
         captured_groups = self.extract_groups(content)
         if not captured_groups:
             return None
-        
+
         try:
             return self.message_template.format(**captured_groups)
         except KeyError as e:
-            logger.warning(f"Failed to interpolate message template '{self.message_template}': missing key {e}")
+            logger.warning(
+                f"Failed to interpolate message template '{self.message_template}': missing key {e}"
+            )
             return None
         except Exception as e:
-            logger.warning(f"Failed to interpolate message template '{self.message_template}': {e}")
+            logger.warning(
+                f"Failed to interpolate message template '{self.message_template}': {e}"
+            )
             return None
 
 
@@ -101,7 +107,9 @@ class RegexCondition:
 class PatternRecommendation:
     """Enhanced pattern-based recommendation with regex support"""
 
-    conditions: List[Union[str, List[str], Dict[str, Any]]] = field(default_factory=list)
+    conditions: List[Union[str, List[str], Dict[str, Any]]] = field(
+        default_factory=list
+    )
     message: str = ""
     captured_groups: Dict[str, str] = field(default_factory=dict, init=False)
     interpolated_message: Optional[str] = field(default=None, init=False)
@@ -248,18 +256,18 @@ class DiagnosticConfigLoader:
                 pattern = condition_data.get("pattern")
                 if not pattern:
                     raise ValueError("Regex condition missing 'pattern' field")
-                
+
                 # Validate regex syntax early
                 try:
                     re.compile(pattern, condition_data.get("flags", re.IGNORECASE))
                 except re.error as e:
                     raise ValueError(f"Invalid regex pattern '{pattern}': {e}")
-                
+
                 return {
                     "type": "regex",
                     "pattern": pattern,
                     "message_template": condition_data.get("message_template"),
-                    "flags": condition_data.get("flags", re.IGNORECASE)
+                    "flags": condition_data.get("flags", re.IGNORECASE),
                 }
             else:
                 # Unknown dict format
@@ -304,18 +312,20 @@ class DiagnosticConfigLoader:
                         # Parse and validate conditions using helper method
                         raw_conditions = pattern_data.get("conditions", [])
                         parsed_conditions = []
-                        
+
                         for condition in raw_conditions:
                             parsed_condition = self._parse_pattern_condition(condition)
                             parsed_conditions.append(parsed_condition)
-                        
+
                         patterns[pattern_name] = PatternRecommendation(
                             conditions=parsed_conditions,
                             message=pattern_data.get("message", ""),
                         )
-                        
-                        logger.debug(f"Parsed pattern '{pattern_name}' with {len(parsed_conditions)} conditions")
-                        
+
+                        logger.debug(
+                            f"Parsed pattern '{pattern_name}' with {len(parsed_conditions)} conditions"
+                        )
+
                     except Exception as e:
                         logger.error(f"Failed to parse pattern '{pattern_name}': {e}")
                         # Skip invalid patterns rather than failing completely
@@ -331,34 +341,42 @@ class DiagnosticConfigLoader:
         # ALSO parse the separate pattern_recommendations section
         if "pattern_recommendations" in yaml_data:
             pattern_rec_data = yaml_data["pattern_recommendations"]
-            
+
             # Merge with existing patterns
-            existing_patterns = config.recommendations.patterns if hasattr(config, 'recommendations') else {}
-            
+            existing_patterns = (
+                config.recommendations.patterns
+                if hasattr(config, "recommendations")
+                else {}
+            )
+
             for pattern_name, pattern_data in pattern_rec_data.items():
                 try:
                     # Parse and validate conditions using helper method
                     raw_conditions = pattern_data.get("conditions", [])
                     parsed_conditions = []
-                    
+
                     for condition in raw_conditions:
                         parsed_condition = self._parse_pattern_condition(condition)
                         parsed_conditions.append(parsed_condition)
-                    
+
                     existing_patterns[pattern_name] = PatternRecommendation(
                         conditions=parsed_conditions,
                         message=pattern_data.get("message", ""),
                     )
-                    
-                    logger.debug(f"Parsed pattern_recommendations '{pattern_name}' with {len(parsed_conditions)} conditions")
-                    
+
+                    logger.debug(
+                        f"Parsed pattern_recommendations '{pattern_name}' with {len(parsed_conditions)} conditions"
+                    )
+
                 except Exception as e:
-                    logger.error(f"Failed to parse pattern_recommendations '{pattern_name}': {e}")
+                    logger.error(
+                        f"Failed to parse pattern_recommendations '{pattern_name}': {e}"
+                    )
                     # Skip invalid patterns rather than failing completely
                     continue
-            
+
             # Update the patterns in recommendations config
-            if not hasattr(config, 'recommendations'):
+            if not hasattr(config, "recommendations"):
                 config.recommendations = RecommendationsConfig()
             config.recommendations.patterns = existing_patterns
 

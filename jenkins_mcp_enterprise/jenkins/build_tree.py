@@ -32,7 +32,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-
 BuildTreeNode = Dict[str, Any]
 
 

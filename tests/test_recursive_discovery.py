@@ -5,8 +5,9 @@ from unittest.mock import MagicMock, patch
 from jenkins_mcp_enterprise.jenkins.subbuild_discoverer import SubBuildDiscoverer
 from jenkins_mcp_enterprise.base import SubBuild
 
+
 class TestRecursiveDiscovery:
-    
+
     @pytest.fixture
     def mock_connection(self):
         connection = MagicMock()
@@ -25,16 +26,21 @@ class TestRecursiveDiscovery:
     def test_immediate_cycle_detection(self, discoverer):
         """Test that a job triggering itself doesn't cause infinite recursion"""
         # Setup: Job A #1 triggers Job A #1 (immediate cycle)
-        
+
         # Mock get_build_info to return success
-        discoverer.connection.client.get_build_info.return_value = {"result": "SUCCESS", "url": "http://jenkins/job/A/1/"}
-        
+        discoverer.connection.client.get_build_info.return_value = {
+            "result": "SUCCESS",
+            "url": "http://jenkins/job/A/1/",
+        }
+
         # Mock discovery to return the parent as a child
         # (Sequential path uses the *_via_* methods.)
         with patch.object(
             discoverer, "_discover_children_via_wfapi", return_value=[("JobA", 1)]
         ):
-            with patch.object(discoverer, "_discover_children_via_tree_api", return_value=[]):
+            with patch.object(
+                discoverer, "_discover_children_via_tree_api", return_value=[]
+            ):
                 with patch.object(
                     discoverer, "_discover_children_via_classic_api", return_value=[]
                 ):
@@ -50,9 +56,12 @@ class TestRecursiveDiscovery:
     def test_indirect_cycle_detection(self, discoverer):
         """Test that A -> B -> A doesn't cause infinite recursion"""
         # Setup: Job A #1 -> Job B #1 -> Job A #1
-        
-        discoverer.connection.client.get_build_info.return_value = {"result": "SUCCESS", "url": "http://jenkins/job/url/"}
-        
+
+        discoverer.connection.client.get_build_info.return_value = {
+            "result": "SUCCESS",
+            "url": "http://jenkins/job/url/",
+        }
+
         def mock_discover_children(job_name, build_number):
             if job_name == "JobA" and build_number == 1:
                 return [("JobB", 1)]
@@ -61,9 +70,13 @@ class TestRecursiveDiscovery:
             return []
 
         with patch.object(
-            discoverer, "_discover_children_via_wfapi", side_effect=mock_discover_children
+            discoverer,
+            "_discover_children_via_wfapi",
+            side_effect=mock_discover_children,
         ):
-            with patch.object(discoverer, "_discover_children_via_tree_api", return_value=[]):
+            with patch.object(
+                discoverer, "_discover_children_via_tree_api", return_value=[]
+            ):
                 with patch.object(
                     discoverer, "_discover_children_via_classic_api", return_value=[]
                 ):
@@ -80,14 +93,17 @@ class TestRecursiveDiscovery:
 
     def test_diamond_dependency(self, discoverer):
         """Test that A -> B, A -> C, B -> D, C -> D handles duplicates correctly"""
-        # Setup: 
+        # Setup:
         # A1 -> B1
         # A1 -> C1
         # B1 -> D1
         # C1 -> D1
-        
-        discoverer.connection.client.get_build_info.return_value = {"result": "SUCCESS", "url": "http://jenkins/job/url/"}
-        
+
+        discoverer.connection.client.get_build_info.return_value = {
+            "result": "SUCCESS",
+            "url": "http://jenkins/job/url/",
+        }
+
         def mock_discover_children(job_name, build_number):
             if job_name == "JobA":
                 return [("JobB", 1), ("JobC", 1)]
@@ -98,9 +114,13 @@ class TestRecursiveDiscovery:
             return []
 
         with patch.object(
-            discoverer, "_discover_children_via_wfapi", side_effect=mock_discover_children
+            discoverer,
+            "_discover_children_via_wfapi",
+            side_effect=mock_discover_children,
         ):
-            with patch.object(discoverer, "_discover_children_via_tree_api", return_value=[]):
+            with patch.object(
+                discoverer, "_discover_children_via_tree_api", return_value=[]
+            ):
                 with patch.object(
                     discoverer, "_discover_children_via_classic_api", return_value=[]
                 ):

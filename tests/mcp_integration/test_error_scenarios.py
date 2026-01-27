@@ -27,9 +27,8 @@ class TestErrorScenarios:
         with pytest.raises(TimeoutError) as excinfo:
             async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
                 pass
-        
-        assert "server failed to initialize" in str(excinfo.value).lower()
 
+        assert "server failed to initialize" in str(excinfo.value).lower()
 
     @pytest.mark.asyncio
     async def test_invalid_build_number(self, seeded_jenkins_test_env):
@@ -353,6 +352,7 @@ class TestErrorScenarios:
             assert "content" in result
             data_str = result["content"][0]["text"]
             import json
+
             data = json.loads(data_str)
 
             # Should have basic information even if advanced features fail

@@ -91,8 +91,7 @@ async def test_resources_list_includes_jenkins_instances(seeded_jenkins_test_env
         template_uris = {t.get("uriTemplate") for t in templates if isinstance(t, dict)}
 
         assert (
-            "jenkins://instances" in uris
-            or "jenkins://instances" in template_uris
+            "jenkins://instances" in uris or "jenkins://instances" in template_uris
         ), f"Expected jenkins://instances in resources/list. Got uris={uris}, templates={template_uris}"
 
 
