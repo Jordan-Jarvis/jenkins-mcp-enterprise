@@ -17,7 +17,7 @@ class TestDependencyInjectionIntegration:
         from jenkins_mcp_enterprise.jenkins.jenkins_client import JenkinsClient
         from jenkins_mcp_enterprise.cache_manager import CacheManager
         from jenkins_mcp_enterprise.tool_factory import ToolFactory
-        
+
         container = seeded_jenkins_test_env.container
 
         # Verify all major components can be resolved
@@ -37,24 +37,28 @@ class TestDependencyInjectionIntegration:
         """Test cache manager with real filesystem operations"""
         from jenkins_mcp_enterprise.cache_manager import CacheManager
         from jenkins_mcp_enterprise.jenkins.jenkins_client import JenkinsClient
+
         cache_manager = seeded_jenkins_test_env.container.get(CacheManager)
         jenkins_client = seeded_jenkins_test_env.container.get(JenkinsClient)
-        
+
         # Setup a build and its log in the test double
         build_data = BuildDataFactory.create_successful_build("cache-test-job", 1)
         log_content = "This is the log content."
-        seeded_jenkins_test_env.add_jenkins_job("cache-test-job", {"name": "cache-test-job", "nextBuildNumber": 2})
+        seeded_jenkins_test_env.add_jenkins_job(
+            "cache-test-job", {"name": "cache-test-job", "nextBuildNumber": 2}
+        )
         seeded_jenkins_test_env.add_jenkins_build("cache-test-job", 1, build_data)
         seeded_jenkins_test_env.add_console_log("cache-test-job", 1, log_content)
 
         # Create a Build object to pass to the cache manager
         from jenkins_mcp_enterprise.base import Build
+
         build = Build(job_name="cache-test-job", build_number=1)
 
         # 1. First fetch should get from Jenkins and cache it
         log_path = cache_manager.fetch(jenkins_client, build)
         assert log_path.exists()
-        
+
         lines = cache_manager.read_lines(log_path)
         assert lines[0] == "This is the log content."
 
@@ -68,6 +72,7 @@ class TestDependencyInjectionIntegration:
     def test_tool_factory_integration(self, seeded_jenkins_test_env):
         """Test tool factory creates tools with proper dependencies"""
         from jenkins_mcp_enterprise.tool_factory import ToolFactory
+
         tool_factory = seeded_jenkins_test_env.container.get(ToolFactory)
 
         # Get all available tools
@@ -93,6 +98,7 @@ class TestDependencyInjectionIntegration:
         from jenkins_mcp_enterprise.jenkins.build_manager import BuildManager
         from jenkins_mcp_enterprise.jenkins.log_fetcher import LogFetcher
         from jenkins_mcp_enterprise.cache_manager import CacheManager
+
         # Setup test job
         seeded_jenkins_test_env.add_jenkins_job(
             "workflow-job",
@@ -113,7 +119,9 @@ class TestDependencyInjectionIntegration:
         log_content = LogDataFactory.create_simple_log()
 
         seeded_jenkins_test_env.jenkins_double.add_build("workflow-job", 1, build_data)
-        seeded_jenkins_test_env.jenkins_double.add_console_log("workflow-job", 1, log_content)
+        seeded_jenkins_test_env.jenkins_double.add_console_log(
+            "workflow-job", 1, log_content
+        )
 
         # 3. Get build info
         build_info = build_manager.get_build_info("workflow-job", 1)
@@ -125,6 +133,7 @@ class TestDependencyInjectionIntegration:
 
         # 5. Verify cache worked
         from jenkins_mcp_enterprise.base import Build
+
         build = Build(job_name="workflow-job", build_number=1)
         log_path = cache_manager.get_path(build)
         assert log_path.exists()
@@ -152,6 +161,7 @@ class TestConfigurationIntegration:
 
         try:
             from jenkins_mcp_enterprise.config import MCPConfig
+
             config = MCPConfig.from_env()
 
             assert config.jenkins.url == "http://test-jenkins:8080"
@@ -187,6 +197,7 @@ class TestConfigurationIntegration:
 
         try:
             from jenkins_mcp_enterprise.config import MCPConfig
+
             config = MCPConfig.from_env()
             assert config.jenkins.url == "http://jenkins.example.com"
             assert config.jenkins.username == "user"
@@ -210,7 +221,9 @@ class TestConfigurationIntegration:
         jenkins_client = container.get(JenkinsClient)
         cache_manager = container.get(CacheManager)
 
-        assert jenkins_client.connection.config.username == config["jenkins"]["username"]
+        assert (
+            jenkins_client.connection.config.username == config["jenkins"]["username"]
+        )
         assert str(cache_manager.cache_dir).startswith(config["cache"]["base_dir"])
 
 
@@ -220,6 +233,7 @@ class TestErrorHandlingIntegration:
     def test_jenkins_connection_error_handling(self, seeded_jenkins_test_env):
         """Test handling of Jenkins connection errors"""
         from jenkins_mcp_enterprise.jenkins.jenkins_client import JenkinsClient
+
         # Stop the Jenkins test double to simulate connection failure
         seeded_jenkins_test_env.jenkins_double.stop()
 
@@ -229,7 +243,9 @@ class TestErrorHandlingIntegration:
         with pytest.raises(Exception):  # Should raise appropriate exception
             jenkins_client.get_build_info("any-job", 1)
 
-    @pytest.mark.skip(reason="This test requires root permissions to fail, which is not reliable.")
+    @pytest.mark.skip(
+        reason="This test requires root permissions to fail, which is not reliable."
+    )
     def test_cache_permission_error_handling(self):
         """Test handling of cache permission errors"""
         pass
@@ -238,6 +254,7 @@ class TestErrorHandlingIntegration:
         """Test handling of build not found errors"""
         from jenkins_mcp_enterprise.jenkins.build_manager import BuildManager
         from jenkins_mcp_enterprise.jenkins.log_fetcher import LogFetcher
+
         build_manager = seeded_jenkins_test_env.container.get(BuildManager)
         log_fetcher = seeded_jenkins_test_env.container.get(LogFetcher)
 
@@ -255,10 +272,13 @@ class TestPerformanceIntegration:
     def test_large_log_handling(self, seeded_jenkins_test_env):
         """Test handling of large console logs"""
         from jenkins_mcp_enterprise.jenkins.log_fetcher import LogFetcher
+
         # Create large log content (simulate 1MB log)
         large_log = "Log line with some content\n" * 40000  # ~1MB
 
-        seeded_jenkins_test_env.add_jenkins_job("large-log-job", {"name": "large-log-job", "nextBuildNumber": 2})
+        seeded_jenkins_test_env.add_jenkins_job(
+            "large-log-job", {"name": "large-log-job", "nextBuildNumber": 2}
+        )
         build_data = BuildDataFactory.create_successful_build("large-log-job", 1)
         seeded_jenkins_test_env.add_jenkins_build("large-log-job", 1, build_data)
         seeded_jenkins_test_env.add_console_log("large-log-job", 1, large_log)

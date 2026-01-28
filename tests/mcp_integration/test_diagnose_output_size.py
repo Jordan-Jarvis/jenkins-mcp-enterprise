@@ -14,7 +14,9 @@ from .mcp_test_client import MCPTestClient
 
 
 @pytest.mark.asyncio
-async def test_diagnose_build_failure_error_analysis_is_bounded(seeded_jenkins_test_env):
+async def test_diagnose_build_failure_error_analysis_is_bounded(
+    seeded_jenkins_test_env,
+):
     config = seeded_jenkins_test_env.config
     jenkins_url = config["jenkins"]["url"]
 
@@ -41,8 +43,8 @@ async def test_diagnose_build_failure_error_analysis_is_bounded(seeded_jenkins_t
         assert len(errors) <= 10
 
         for e in errors:
-            match_text = (e.get("match_text") or "")
-            context = (e.get("context") or "")
+            match_text = e.get("match_text") or ""
+            context = e.get("context") or ""
 
             # Hard caps to prevent runaway responses
             assert len(match_text) <= 600

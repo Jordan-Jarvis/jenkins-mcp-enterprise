@@ -15,7 +15,6 @@ from .test_doubles import JenkinsTestDouble, QdrantTestDouble
 class TestInfrastructure:
     """Test MCP infrastructure and protocol compliance"""
 
-
     @pytest.mark.asyncio
     async def test_jenkins_mcp_enterprise_startup(self, seeded_jenkins_test_env):
         """Test that MCP server starts up correctly"""

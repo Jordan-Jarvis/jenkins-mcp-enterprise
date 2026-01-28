@@ -121,7 +121,7 @@ class SubBuildDiscoverer:
         """Original sequential discovery method (fallback)"""
         all_sub_builds: List[SubBuild] = []
         visited_builds: Set[Tuple[str, int]] = set()
-        
+
         # Add the parent itself to visited to prevent cycles back to root
         visited_builds.add((parent_job_name, parent_build_number))
 
@@ -409,7 +409,7 @@ class SubBuildDiscoverer:
                     continue
 
                 upstream_build = cause.get("upstreamBuild")
-                
+
                 # Case 1: Check upstreamBuild (classic Jenkins cause)
                 if upstream_build is not None:
                     try:
@@ -432,9 +432,11 @@ class SubBuildDiscoverer:
 
                     # Jenkins sometimes provides only a leaf name or differs in folder prefix.
                     # Allow suffix matches in either direction.
-                    if upstream_norm.endswith(parent_norm) or parent_norm.endswith(upstream_norm):
+                    if upstream_norm.endswith(parent_norm) or parent_norm.endswith(
+                        upstream_norm
+                    ):
                         return True
-                        
+
                 # Case 2: Check "Started by upstream project" description heuristic
                 # This is a fallback for when upstream fields are missing but description is clear.
                 # We require BOTH the project name and build number to be present in the description.
@@ -442,11 +444,11 @@ class SubBuildDiscoverer:
                 if desc and f"#{parent_build_number}" in desc:
                     # Check if parent job name (or leaf) is in description
                     # e.g. "Started by upstream project QA_JOBS/master build #9"
-                    
+
                     # Try full name first
                     if parent_job_name in desc:
                         return True
-                        
+
                     # Try leaf name (last part of job name)
                     # e.g. parent="QA/master", desc="Started by upstream project master build #9"
                     parent_leaf = parent_job_name.split("/")[-1]
@@ -541,12 +543,18 @@ class SubBuildDiscoverer:
                                     downstream_build = downstream.get("buildNumber")
                                     if downstream_job and downstream_build:
                                         # Normalize the discovered job name
-                                        normalized_job = JobNameParser.normalize_job_name(
-                                            downstream_job
+                                        normalized_job = (
+                                            JobNameParser.normalize_job_name(
+                                                downstream_job
+                                            )
                                         )
-                                        children.append((normalized_job, int(downstream_build)))
+                                        children.append(
+                                            (normalized_job, int(downstream_build))
+                                        )
                 except Exception as e:
-                    logger.debug(f"wfapi/runs failed for {job_name}#{build_number}: {e}")
+                    logger.debug(
+                        f"wfapi/runs failed for {job_name}#{build_number}: {e}"
+                    )
 
         except Exception as e:
             logger.debug(f"wfapi discovery failed for {job_name}#{build_number}: {e}")
@@ -661,11 +669,11 @@ class SubBuildDiscoverer:
         # However, to prevent infinite recursion in sequential mode, we need to track
         # the current path or use a global visited set if we don't care about duplicates.
         # The current implementation uses a global visited set for the traversal.
-        
+
         # If we've already visited this node, we don't need to re-discover its children
         # BUT we might need to add it to the list if it's a child of the current parent
         # (handled by _process_discovered_children)
-        
+
         # Try different discovery methods in order of preference
         discovered_children = self._discover_all_children(
             current_build_job_name, current_build_number

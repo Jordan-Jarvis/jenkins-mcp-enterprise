@@ -112,8 +112,10 @@ class MCPTestClient:
             stderr_data = await self.process.stderr.read()
             if stderr_data:
                 stderr = stderr_data.decode("utf-8")
-        
-        raise TimeoutError(f"Server failed to initialize within timeout. Stderr: {stderr}")
+
+        raise TimeoutError(
+            f"Server failed to initialize within timeout. Stderr: {stderr}"
+        )
 
     async def _read_responses(self):
         """Continuously read responses from the server"""

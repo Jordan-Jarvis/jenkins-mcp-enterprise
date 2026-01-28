@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from jenkins_mcp_enterprise.config import CacheConfig, JenkinsConfig, MCPConfig, VectorConfig
+from jenkins_mcp_enterprise.config import (
+    CacheConfig,
+    JenkinsConfig,
+    MCPConfig,
+    VectorConfig,
+)
 from jenkins_mcp_enterprise.di_container import DIContainer
 from jenkins_mcp_enterprise.jenkins.build_manager import BuildManager
 from jenkins_mcp_enterprise.jenkins.log_fetcher import LogFetcher
@@ -20,11 +25,12 @@ from tests.mcp_integration.test_doubles import JenkinsTestDouble, QdrantTestDoub
 @dataclass
 class MockBuild:
     """Mock build data for testing"""
+
     job_name: str
     build_number: int
     status: str = "SUCCESS"
     url: str = ""
-    
+
     def __post_init__(self):
         if not self.url:
             self.url = f"https://jenkins.example.com/job/{self.job_name.replace('/', '/job/')}/{self.build_number}/"
@@ -32,23 +38,19 @@ class MockBuild:
 
 class BuildDataFactory:
     """Factory for creating test build data"""
-    
+
     @staticmethod
-    def create_successful_build(job_name: str = "test-job", build_number: int = 1) -> MockBuild:
-        return MockBuild(
-            job_name=job_name,
-            build_number=build_number,
-            status="SUCCESS"
-        )
-    
+    def create_successful_build(
+        job_name: str = "test-job", build_number: int = 1
+    ) -> MockBuild:
+        return MockBuild(job_name=job_name, build_number=build_number, status="SUCCESS")
+
     @staticmethod
-    def create_failed_build(job_name: str = "test-job", build_number: int = 1) -> MockBuild:
-        return MockBuild(
-            job_name=job_name,
-            build_number=build_number,
-            status="FAILURE"
-        )
-    
+    def create_failed_build(
+        job_name: str = "test-job", build_number: int = 1
+    ) -> MockBuild:
+        return MockBuild(job_name=job_name, build_number=build_number, status="FAILURE")
+
     @staticmethod
     def create_build_hierarchy() -> List[MockBuild]:
         """Create a test build hierarchy"""
@@ -56,13 +58,13 @@ class BuildDataFactory:
             MockBuild("parent-job", 100, "FAILURE"),
             MockBuild("child-job-1", 50, "SUCCESS"),
             MockBuild("child-job-2", 25, "FAILURE"),
-            MockBuild("grandchild-job", 10, "FAILURE")
+            MockBuild("grandchild-job", 10, "FAILURE"),
         ]
 
 
 class LogDataFactory:
     """Factory for creating test log data"""
-    
+
     @staticmethod
     def create_simple_log() -> str:
         return """
@@ -78,7 +80,7 @@ BUILD SUCCESSFUL in 2m 30s
 [Pipeline] End of Pipeline
 Finished: SUCCESS
         """.strip()
-    
+
     @staticmethod
     def create_failed_log() -> str:
         return """
@@ -106,7 +108,7 @@ BUILD FAILED in 1m 45s
 [Pipeline] End of Pipeline
 Finished: FAILURE
         """.strip()
-    
+
     @staticmethod
     def create_java_exception_log() -> str:
         return """
@@ -131,7 +133,7 @@ def mock_jenkins_config():
         "username": "test_user",
         "token": "test_token",
         "timeout": 30,
-        "verify_ssl": False
+        "verify_ssl": False,
     }
 
 
@@ -238,7 +240,9 @@ def jenkins_test_env():
         top_k_default=5,
         timeout=15,
     )
-    mcp_config = MCPConfig(jenkins=jenkins_config, cache=cache_config, vector=vector_config)
+    mcp_config = MCPConfig(
+        jenkins=jenkins_config, cache=cache_config, vector=vector_config
+    )
 
     container = DIContainer(config=mcp_config, config_file_path=config_file_path)
 
@@ -317,7 +321,7 @@ def sample_logs():
     return {
         "success": LogDataFactory.create_simple_log(),
         "failure": LogDataFactory.create_failed_log(),
-        "java_exception": LogDataFactory.create_java_exception_log()
+        "java_exception": LogDataFactory.create_java_exception_log(),
     }
 
 
@@ -339,7 +343,7 @@ def seeded_jenkins_test_env(jenkins_test_env, sample_builds, sample_logs):
                         {
                             "name": "BRANCH",
                             "type": "StringParameterDefinition",
-                            "defaultParameterValue": {"value": "main"}
+                            "defaultParameterValue": {"value": "main"},
                         },
                         {
                             "name": "DEPLOY_ENV",
@@ -361,7 +365,12 @@ def seeded_jenkins_test_env(jenkins_test_env, sample_builds, sample_logs):
         {
             "name": "master",
             "url": f"http://localhost:{env.jenkins_double.port}/job/QA_JOBS/job/master/",
-            "builds": [{"number": 9, "url": f"http://localhost:{env.jenkins_double.port}/job/QA_JOBS/job/master/9/"}],
+            "builds": [
+                {
+                    "number": 9,
+                    "url": f"http://localhost:{env.jenkins_double.port}/job/QA_JOBS/job/master/9/",
+                }
+            ],
             "lastBuild": {"number": 9},
         },
     )

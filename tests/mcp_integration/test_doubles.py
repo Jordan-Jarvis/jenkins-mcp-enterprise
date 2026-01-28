@@ -22,7 +22,10 @@ class JenkinsTestDouble:
     def add_build(self, job_name, build_number, build_data):
         """Add a build to a job"""
         if job_name in self.jobs:
-            self.jobs[job_name]["builds"][build_number] = {"data": build_data, "log": ""}
+            self.jobs[job_name]["builds"][build_number] = {
+                "data": build_data,
+                "log": "",
+            }
 
     def add_console_log(self, job_name, build_number, log_content):
         """Add a console log to a build"""
@@ -31,8 +34,13 @@ class JenkinsTestDouble:
 
     def add_sub_builds(self, parent_job_name, parent_build_number, sub_builds):
         """Associate sub-builds with a parent build"""
-        if parent_job_name in self.jobs and parent_build_number in self.jobs[parent_job_name]["builds"]:
-            self.jobs[parent_job_name]["builds"][parent_build_number]["data"]["sub_builds"] = sub_builds
+        if (
+            parent_job_name in self.jobs
+            and parent_build_number in self.jobs[parent_job_name]["builds"]
+        ):
+            self.jobs[parent_job_name]["builds"][parent_build_number]["data"][
+                "sub_builds"
+            ] = sub_builds
 
     def start(self):
         """Start the test double server"""
@@ -80,16 +88,16 @@ class JenkinsTestDouble:
                     else:
                         # This part of the path is not a job segment, so we stop.
                         break
-                
+
                 if not job_name_segments:
                     return None, -1
 
                 job_name = "/".join(job_name_segments)
-                
+
                 # The end index is where the job name parsing stopped.
                 # It's the sum of 'job' parts and name parts.
                 end_index = len(job_name_segments) * 2
-                
+
                 # The above logic is too simple and fails for root-level jobs.
                 # A more robust way is to check against known jobs.
                 url_path = "/".join(parts)
@@ -98,7 +106,7 @@ class JenkinsTestDouble:
                     expected_path_prefix = "job/" + j.replace("/", "/job/")
                     if url_path.startswith(expected_path_prefix):
                         # Found a match. The end index is the length of the prefix.
-                        end_index = len(expected_path_prefix.split('/'))
+                        end_index = len(expected_path_prefix.split("/"))
                         return j, end_index
 
                 return None, -1
@@ -126,10 +134,13 @@ class JenkinsTestDouble:
 
                 if job_name and job_name in jobs:
                     job_data = jobs[job_name]
-                    
+
                     # Check for build number
                     build_number = None
-                    if job_name_end_index < len(parts) and parts[job_name_end_index].isdigit():
+                    if (
+                        job_name_end_index < len(parts)
+                        and parts[job_name_end_index].isdigit()
+                    ):
                         build_number = int(parts[job_name_end_index])
 
                     if build_number is not None:
@@ -159,14 +170,16 @@ class JenkinsTestDouble:
                 jobs = outer.jobs
                 path = self.path.split("?")[0]
                 parts = path.strip("/").split("/")
-                
+
                 job_name, _ = self._get_job_name_from_path(parts)
 
-                if job_name and (path.endswith("/build") or path.endswith("/buildWithParameters")):
+                if job_name and (
+                    path.endswith("/build") or path.endswith("/buildWithParameters")
+                ):
                     if job_name in jobs:
                         # Simulate build triggering and updating the job info
                         job_data = jobs[job_name]
-                        
+
                         # Find next build number
                         if "nextBuildNumber" in job_data["data"]:
                             build_number = job_data["data"]["nextBuildNumber"]
@@ -217,7 +230,6 @@ class JenkinsTestDouble:
             def log_message(self, format, *args):
                 # Suppress log messages for cleaner test output
                 pass
-
 
         return JenkinsHandler
 
@@ -271,7 +283,8 @@ class QdrantTestDouble:
                     response = {
                         "result": {
                             "collections": [
-                                {"name": name} for name in sorted(list(outer.collections))
+                                {"name": name}
+                                for name in sorted(list(outer.collections))
                             ]
                         }
                     }
@@ -288,7 +301,10 @@ class QdrantTestDouble:
                     else:
                         response = {
                             "status": "error",
-                            "result": {"status": "error", "error": "Collection not found"},
+                            "result": {
+                                "status": "error",
+                                "error": "Collection not found",
+                            },
                             "time": 0,
                         }
                         self._json_response(response, status_code=404)

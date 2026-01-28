@@ -15,7 +15,6 @@ from .test_doubles import JenkinsTestDouble, QdrantTestDouble
 class TestPerformance:
     """Test performance characteristics"""
 
-
     @pytest.mark.asyncio
     async def test_tool_response_times(self, seeded_jenkins_test_env):
         """Test that tools respond within acceptable time limits"""
@@ -27,7 +26,11 @@ class TestPerformance:
             start_time = time.time()
             result = await client.call_tool(
                 "trigger_build_async",
-                {"job_name": "sample-job", "params": {"BRANCH": "main"}, "jenkins_url": jenkins_url},
+                {
+                    "job_name": "sample-job",
+                    "params": {"BRANCH": "main"},
+                    "jenkins_url": jenkins_url,
+                },
             )
             response_time = time.time() - start_time
 
@@ -39,7 +42,8 @@ class TestPerformance:
             # Test job parameters (should be fast)
             start_time = time.time()
             result = await client.call_tool(
-                "get_job_parameters", {"job_name": "sample-job", "jenkins_url": jenkins_url}
+                "get_job_parameters",
+                {"job_name": "sample-job", "jenkins_url": jenkins_url},
             )
             response_time = time.time() - start_time
 
@@ -81,7 +85,11 @@ class TestPerformance:
             for i in range(5):
                 task = client.call_tool(
                     "trigger_build_async",
-                    {"job_name": "sample-job", "params": {"RUN_ID": str(i)}, "jenkins_url": jenkins_url},
+                    {
+                        "job_name": "sample-job",
+                        "params": {"RUN_ID": str(i)},
+                        "jenkins_url": jenkins_url,
+                    },
                 )
                 tasks.append(task)
 
@@ -104,14 +112,30 @@ class TestPerformance:
             start_time = time.time()
 
             mixed_tasks = [
-                client.call_tool("get_job_parameters", {"job_name": "sample-job", "jenkins_url": jenkins_url}),
-                client.call_tool("trigger_build_async", {"job_name": "sample-job", "jenkins_url": jenkins_url}),
                 client.call_tool(
-                    "get_log_context", {"job_name": "sample-job", "build_number": 1, "jenkins_url": jenkins_url}
+                    "get_job_parameters",
+                    {"job_name": "sample-job", "jenkins_url": jenkins_url},
+                ),
+                client.call_tool(
+                    "trigger_build_async",
+                    {"job_name": "sample-job", "jenkins_url": jenkins_url},
+                ),
+                client.call_tool(
+                    "get_log_context",
+                    {
+                        "job_name": "sample-job",
+                        "build_number": 1,
+                        "jenkins_url": jenkins_url,
+                    },
                 ),
                 client.call_tool(
                     "filter_errors_grep",
-                    {"job_name": "sample-job", "build_number": 1, "pattern": "ERROR", "jenkins_url": jenkins_url},
+                    {
+                        "job_name": "sample-job",
+                        "build_number": 1,
+                        "pattern": "ERROR",
+                        "jenkins_url": jenkins_url,
+                    },
                 ),
             ]
 
@@ -236,7 +260,11 @@ class TestPerformance:
 
             result = await client.call_tool(
                 "diagnose_build_failure",
-                {"job_name": "QA_JOBS/master", "build_number": 9, "jenkins_url": jenkins_url},
+                {
+                    "job_name": "QA_JOBS/master",
+                    "build_number": 9,
+                    "jenkins_url": jenkins_url,
+                },
             )
 
             diagnosis_time = time.time() - start_time
@@ -299,10 +327,17 @@ class TestPerformance:
             for i in range(20):
                 # Mix of different operations
                 operations = [
-                    client.call_tool("get_job_parameters", {"job_name": "sample-job", "jenkins_url": jenkins_url}),
+                    client.call_tool(
+                        "get_job_parameters",
+                        {"job_name": "sample-job", "jenkins_url": jenkins_url},
+                    ),
                     client.call_tool(
                         "trigger_build_async",
-                        {"job_name": "sample-job", "params": {"RUN": str(i)}, "jenkins_url": jenkins_url},
+                        {
+                            "job_name": "sample-job",
+                            "params": {"RUN": str(i)},
+                            "jenkins_url": jenkins_url,
+                        },
                     ),
                     client.call_tool(
                         "get_log_context",

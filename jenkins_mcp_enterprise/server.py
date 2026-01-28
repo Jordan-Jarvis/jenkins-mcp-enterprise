@@ -44,18 +44,20 @@ def create_server(config=None, config_file_path=None) -> FastMCP:
 
     # Create FastMCP server with settings for HTTP transport
     mcp = FastMCP("Jenkins MCP Server")
-    
+
     # Configure host/port for HTTP transports via settings
     import os
-    if os.environ.get('UVICORN_HOST'):
-        mcp.settings.host = os.environ.get('UVICORN_HOST', '0.0.0.0')
-    if os.environ.get('UVICORN_PORT'):
-        mcp.settings.port = int(os.environ.get('UVICORN_PORT', 8000))
-    
+
+    if os.environ.get("UVICORN_HOST"):
+        mcp.settings.host = os.environ.get("UVICORN_HOST", "0.0.0.0")
+    if os.environ.get("UVICORN_PORT"):
+        mcp.settings.port = int(os.environ.get("UVICORN_PORT", 8000))
+
     # Add health check endpoint for Docker health checks
     @mcp.custom_route("/health", methods=["GET"])
     async def health_check(request):
         from starlette.responses import PlainTextResponse
+
         return PlainTextResponse("OK")
 
     # Get multi-Jenkins manager for roots support
@@ -488,10 +490,11 @@ def main():
             )
 
         sys.stderr.flush()
-        
+
         # Set environment variables for HTTP transports (FastMCP reads these)
         if args.transport in ["sse", "streamable-http"]:
             import os
+
             os.environ["UVICORN_HOST"] = args.host
             os.environ["UVICORN_PORT"] = str(args.port)
             server.run(transport=args.transport, mount_path=args.mount_path)

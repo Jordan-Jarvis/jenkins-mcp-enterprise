@@ -1,22 +1,16 @@
 services:
-  # Qdrant Vector Database
-  # qdrant:
-  #   image: qdrant/qdrant:latest
-  #   container_name: jenkins_mcp_enterprise-qdrant
-  #   ports:
-  #     - "6333:6333"
-  #     - "6334:6334"
-  #   volumes:
-  #     - qdrant_data:/qdrant/storage
-  #   environment:
-  #     - QDRANT__LOG_LEVEL=INFO
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "timeout 5s bash -c '</dev/tcp/localhost/6333' || exit 1"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 3
-  #     start_period: 10s
-  #   restart: unless-stopped
+  # Qdrant Vector Database (optional but recommended for vector search)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: jenkins_mcp_enterprise-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__LOG_LEVEL=INFO
+    restart: unless-stopped
 
   # Jenkins MCP Enterprise Server (HTTP mode - no proxy needed)
   jenkins_mcp_enterprise-server:
@@ -24,18 +18,15 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: jenkins_mcp_enterprise-server
-    # depends_on:
-    #   qdrant:
-    #     condition: service_healthy
     ports:
-      - "3008:8000"
+      - "8000:8000"
     environment:
       - QDRANT_HOST=http://qdrant:6333
       - CACHE_DIR=/tmp/mcp-jenkins
       - LOG_LEVEL=INFO
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8000
-      - DISABLE_VECTOR_SEARCH=true  # Enable vector search with Qdrant
+      - DISABLE_VECTOR_SEARCH=true  # Set to false to enable vector search with Qdrant
     volumes:
       - jenkins_mcp_enterprise_cache:/tmp/mcp-jenkins
       - ./config:/app/config:ro

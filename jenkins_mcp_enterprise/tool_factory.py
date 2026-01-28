@@ -123,7 +123,7 @@ class ToolFactory:
 
         # Tools requiring JenkinsClient, CacheManager, and VectorManager (now with multi-instance support)
         # Only register semantic search tool if vector search is enabled
-        if not getattr(vector_manager, 'vector_search_disabled', True):
+        if not getattr(vector_manager, "vector_search_disabled", True):
             semantic_search_tool = SemanticSearchTool(
                 vector_manager=vector_manager,
                 jenkins_client=jenkins_client,
@@ -175,10 +175,10 @@ class ToolFactory:
         """
         # Base tools count (without vector search tools)
         base_count = 9
-        
+
         # Add vector search tools if enabled
         vector_manager = self.container.get_vector_manager()
-        if not getattr(vector_manager, 'vector_search_disabled', True):
+        if not getattr(vector_manager, "vector_search_disabled", True):
             base_count += 1  # semantic_search tool
-            
+
         return base_count
