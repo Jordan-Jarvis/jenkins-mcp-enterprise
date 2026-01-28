@@ -52,7 +52,7 @@ python3 scripts/validate_diagnostic_config.py
 - `collection_name`: Name of the vector collection (default: jenkins-logs)
 - `dimension`: Vector dimension (default: 384)
 - `metric`: Distance metric for similarity search (default: cosine)
-- `embedding_model`: SentenceTransformer model name (default: all-MiniLM-L6-v2)
+- `embedding_model`: Embedding model name for semantic search (default: all-MiniLM-L6-v2)
 - `chunk_size`: Text chunk size for vectorization (default: 500)
 - `chunk_overlap`: Overlap between chunks (default: 50)
 - `top_k_default`: Default number of results to return (default: 5)
@@ -81,6 +81,10 @@ Limited environment variables are supported for system-level configuration:
 - `QDRANT_HOST` - Qdrant server URL for vector search
 - `CACHE_DIR` - Base directory for caching build logs
 - `JENKINS_MCP_DIAGNOSTIC_CONFIG` - Path to custom diagnostic parameters YAML
+
+**Note on semantic search dependencies**: Vector/semantic search is **disabled by default** and the default install avoids large ML dependencies.
+To enable vector search, install optional dependencies with:
+`pip install jenkins_mcp_enterprise[vector]`
 
 **Note**: Jenkins credentials must be configured in `mcp-config.yml`, not environment variables.
 

@@ -67,7 +67,10 @@ git clone https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise
 cd jenkins-mcp
 python3 -m pip install -e .
 
-# 2. Start vector search engine (recommended)
+# 2. (Optional) Enable semantic/vector search
+# Note: this installs large ML dependencies and runs a local Qdrant instance.
+# If you skip this, vector search stays disabled by default.
+python3 -m pip install -e ".[vector]"
 ./scripts/start_dev_environment.sh
 
 # 3. Configure your Jenkins instances
@@ -78,11 +81,6 @@ jenkins_instances:
     username: "your.email@company.com"
     token: "your-api-token"
     display_name: "Production Jenkins"
-
-vector:
-  disable_vector_search: false  # Enable AI-powered search
-  host: "http://localhost:6333"
-
 settings:
   fallback_instance: "production"
 EOF

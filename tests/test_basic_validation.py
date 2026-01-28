@@ -52,8 +52,6 @@ class TestBasicValidation:
             "requests",
             "yaml",
             "jenkins",  # python-jenkins package provides jenkins module
-            "qdrant_client",
-            "sentence_transformers",
             "tiktoken",
         ]
 
