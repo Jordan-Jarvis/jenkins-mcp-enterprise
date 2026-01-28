@@ -335,10 +335,10 @@ vim config/mcp-config.yml  # Add your Jenkins URLs and tokens
 cp .env.example .env
 
 # 3. Deploy the full stack
-docker-compose up -d
+docker compose up -d
 
 # 4. Verify deployment
-docker-compose ps
+docker compose ps
 curl http://localhost:8000/health
 ```
 
