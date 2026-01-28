@@ -55,6 +55,9 @@ A production-ready Model Context Protocol (MCP) server that transforms how AI as
 # 1. Install the package
 pip install jenkins_mcp_enterprise
 
+# Optional: enable vector/semantic search (large ML deps; not installed by default)
+# pip install "jenkins_mcp_enterprise[vector]"
+
 # 2. Create configuration file
 mkdir -p config
 cp config/mcp-config.example.yml config/mcp-config.yml

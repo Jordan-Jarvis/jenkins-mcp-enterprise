@@ -66,6 +66,12 @@ docker build -t jenkins_mcp_enterprise-server:vector --build-arg INSTALL_VECTOR_
 Then run it with vector search enabled and Qdrant available (either via `docker compose` or another Qdrant instance),
 and set `DISABLE_VECTOR_SEARCH=false`.
 
+If you are using `docker compose`, you can also do this in one shot:
+
+```bash
+INSTALL_VECTOR_DEPS=true DISABLE_VECTOR_SEARCH=false docker compose up -d --build
+```
+
 ## Troubleshooting
 
 ```bash

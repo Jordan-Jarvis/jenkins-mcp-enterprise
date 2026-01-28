@@ -15,14 +15,17 @@ This is a production-ready MCP (Model Context Protocol) server for Jenkins integ
 
 ### Development Setup (Local Python)
 ```bash
-# Start development environment with Qdrant
-./scripts/start_dev_environment.sh
-
 # Install dependencies (use python3)
 python3 -m pip install -e .
 
 # Or install with user flag if permissions issues
 python3 -m pip install --user -e .
+
+# Optional: enable vector/semantic search (large ML deps; not installed by default)
+python3 -m pip install -e ".[vector]"
+
+# Optional: start local Qdrant for vector search
+./scripts/start_dev_environment.sh
 
 # Create configuration file from template
 cp config/mcp-config.example.yml config/mcp-config.yml
@@ -54,14 +57,14 @@ cp .env.example .env
 # Edit .env if needed (optional for file-based config)
 
 # 3. Start production stack
-docker-compose up -d
+docker compose up -d
 
 # 4. Check deployment
-docker-compose ps
-docker-compose logs jenkins_mcp_enterprise-server
+docker compose ps
+docker compose logs jenkins_mcp_enterprise-server
 
 # 5. Stop stack
-docker-compose down
+docker compose down
 ```
 
 ### Testing
@@ -127,7 +130,7 @@ print(f'Console log: {len(lines)} lines')
 
 ### Development Environment
 ```bash
-# Start Qdrant vector database
+# Optional: start Qdrant vector database for semantic search
 ./scripts/start_dev_environment.sh
 
 # Check Qdrant health
@@ -137,7 +140,7 @@ curl http://localhost:6333/health
 open http://localhost:6333/dashboard
 
 # Stop environment
-docker-compose down
+docker compose down
 ```
 
 ### Configuration Validation
@@ -200,11 +203,9 @@ JENKINS_MCP_DIAGNOSTIC_CONFIG="/path/to/custom-diagnostic-parameters.yml"  # Ove
 
 ### Dependency Issues & Solutions
 ```bash
-# Qdrant client version that works
-qdrant-client>=1.14.3
-
-# If numpy conflicts occur (common with latest qdrant-client)
-python3 -m pip install --user qdrant-client
+# Vector search dependencies are optional and NOT installed by default.
+# Install them only when needed:
+python3 -m pip install -e ".[vector]"
 
 # Test basic imports work
 python3 -c "
@@ -229,7 +230,7 @@ This MCP server uses a modular architecture with:
 
 - Handle massive pipeline logs (10+ GB) via streaming
 - Analyze deeply nested pipeline hierarchies
-- Local vector search without external dependencies
+- Optional vector search (Qdrant + ML deps) for semantic log retrieval
 - Type-safe tool implementations with proper error handling
 - Comprehensive MCP integration testing
 
@@ -323,7 +324,7 @@ EOF
 
 ```bash
 # Container won't start - check dependencies
-docker-compose logs jenkins_mcp_enterprise-server
+docker compose logs jenkins_mcp_enterprise-server
 
 # Network connectivity issues
 docker exec jenkins_mcp_enterprise-server ping qdrant
