@@ -20,7 +20,22 @@ COPY ./ ./
 
 # Install the package
 RUN pip3 install -r requirements.txt
-RUN pip3 install -e .
+
+# Optional: install vector/semantic search dependencies (large) behind a build-arg.
+# This keeps the default image small and fast to build.
+#
+# Usage:
+#   docker build -t jenkins_mcp_enterprise-server .
+#   docker build -t jenkins_mcp_enterprise-server:vector --build-arg INSTALL_VECTOR_DEPS=true .
+#
+# When enabled, we preinstall CPU-only torch to avoid pulling nvidia CUDA wheels.
+ARG INSTALL_VECTOR_DEPS=false
+RUN if [ "$INSTALL_VECTOR_DEPS" = "true" ]; then \
+      pip3 install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch && \
+      pip3 install -e ".[vector]" ; \
+    else \
+      pip3 install -e . ; \
+    fi
 
 # Sanity check: ensure the MCP SDK is importable (prevents runtime failures like "No module named 'mcp'")
 RUN python3 -c "import mcp; from mcp.server.fastmcp import FastMCP; print('✅ MCP SDK import OK')"

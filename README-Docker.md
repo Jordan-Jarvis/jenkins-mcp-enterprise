@@ -53,6 +53,19 @@ docker compose logs -f qdrant
 docker compose down
 ```
 
+## Optional: enable vector/semantic search in Docker
+
+By default, the Docker image is built **without** vector search dependencies (keeps builds fast and images small).
+
+To build an image with vector search support:
+
+```bash
+docker build -t jenkins_mcp_enterprise-server:vector --build-arg INSTALL_VECTOR_DEPS=true .
+```
+
+Then run it with vector search enabled and Qdrant available (either via `docker compose` or another Qdrant instance),
+and set `DISABLE_VECTOR_SEARCH=false`.
+
 ## Troubleshooting
 
 ```bash
