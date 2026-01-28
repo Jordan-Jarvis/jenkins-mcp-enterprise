@@ -28,8 +28,6 @@ classifiers = [
 dependencies = [
     "python-jenkins>=1.8.2",
     "requests>=2.31.0",
-    "sentence-transformers>=2.2.0",
-    "qdrant-client>=1.14.3",
     "tiktoken>=0.5.0",
     "APScheduler>=3.11.0",
     "modelcontextprotocol>=0.1.0",
@@ -48,6 +46,11 @@ Documentation = "https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise/blob/ma
 Issues = "https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise/issues"
 
 [project.optional-dependencies]
+vector = [
+    # Optional semantic/vector search support (large deps; not installed by default)
+    "qdrant-client>=1.14.3",
+    "sentence-transformers>=2.2.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",

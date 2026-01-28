@@ -3,17 +3,6 @@
 import os
 from typing import Any, Dict, List, Optional
 
-from qdrant_client import QdrantClient
-from qdrant_client.models import (
-    Distance,
-    FieldCondition,
-    Filter,
-    MatchValue,
-    PointStruct,
-    VectorParams,
-)
-from sentence_transformers import SentenceTransformer
-
 from .base import Build, VectorChunk
 from .config import VectorConfig
 from .exceptions import VectorStoreError
@@ -41,13 +30,23 @@ class QdrantVectorManager:
                 "Vector search functionality is DISABLED (default). Set DISABLE_VECTOR_SEARCH=false to enable."
             )
             logger.info(
-                "Initialized in mock mode. No Qdrant or SentenceTransformer will be loaded"
+                "Initialized in mock mode. Vector search dependencies are not required unless enabled."
             )
             self.client = None
             self.model = None
             self.embedding_dim = 384  # Default dimension
             self.collection_name = config.collection_name
             return
+
+        # Vector search is enabled. Import optional dependencies lazily so the default install stays lightweight.
+        try:
+            from qdrant_client import QdrantClient
+            from sentence_transformers import SentenceTransformer
+        except ImportError as e:
+            raise VectorStoreError(
+                "Vector search is enabled but optional dependencies are missing. "
+                "Install with: `pip install jenkins_mcp_enterprise[vector]`"
+            ) from e
 
         # Initialize Qdrant client
         try:
@@ -98,6 +97,8 @@ class QdrantVectorManager:
         """Ensure the main collection exists with proper configuration"""
         if self.vector_search_disabled or not self.client:
             return
+
+        from qdrant_client.models import Distance, VectorParams
 
         try:
             # Wait briefly for Qdrant to be fully ready (Docker timing issue)
@@ -225,6 +226,8 @@ class QdrantVectorManager:
         if self.vector_search_disabled or not chunks or not self.client:
             return
 
+        from qdrant_client.models import PointStruct
+
         try:
             # Generate embeddings
             vector_chunks = self.embed_chunks(chunks)
@@ -291,6 +294,8 @@ class QdrantVectorManager:
         """Search with hierarchical filtering"""
         if self.vector_search_disabled or not self.client:
             return []
+
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         try:
             # Generate query embedding
@@ -373,6 +378,8 @@ class QdrantVectorManager:
         if self.vector_search_disabled or not self.client:
             return
 
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
         try:
             build_id = f"{build.job_name}:{build.build_number}"
 
@@ -396,6 +403,8 @@ class QdrantVectorManager:
         """Delete all vectors for an entire pipeline hierarchy"""
         if self.vector_search_disabled or not self.client:
             return
+
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         try:
             root_build_id = f"{root_build.job_name}:{root_build.build_number}"
@@ -463,6 +472,8 @@ class QdrantVectorManager:
         if self.vector_search_disabled:
             return
 
+        from qdrant_client.models import PointStruct
+
         # Use configured chunk size if not provided
         effective_chunk_size = chunk_size or self.config.chunk_size
 
@@ -515,6 +526,8 @@ class QdrantVectorManager:
         """Legacy query method for backward compatibility"""
         if self.vector_search_disabled or not self.client:
             return []
+
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         query_embedding = self.model.encode([query_text])[0].tolist()
         build_id = f"{build.job_name}:{build.build_number}"
