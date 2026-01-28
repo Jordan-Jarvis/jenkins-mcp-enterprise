@@ -45,14 +45,6 @@ def create_server(config=None, config_file_path=None) -> FastMCP:
     # Create FastMCP server with settings for HTTP transport
     mcp = FastMCP("Jenkins MCP Server")
 
-    # Configure host/port for HTTP transports via settings
-    import os
-
-    if os.environ.get("UVICORN_HOST"):
-        mcp.settings.host = os.environ.get("UVICORN_HOST", "0.0.0.0")
-    if os.environ.get("UVICORN_PORT"):
-        mcp.settings.port = int(os.environ.get("UVICORN_PORT", 8000))
-
     # Add health check endpoint for Docker health checks
     @mcp.custom_route("/health", methods=["GET"])
     async def health_check(request):
@@ -433,7 +425,7 @@ def main():
         "--mount-path",
         type=str,
         default="/mcp",
-        help="Mount path for HTTP transports (default: /mcp)",
+        help="For streamable-http: HTTP path for the MCP endpoint (default: /mcp). For SSE: mount path used for message endpoint construction (default: /mcp).",
     )
     parser.add_argument(
         "--port",
@@ -482,7 +474,6 @@ def main():
                 f"Starting Jenkins MCP Server (FastMCP) on {args.host}:{args.port} with {args.transport} transport...",
                 file=sys.stderr,
             )
-            # Host/port will be passed directly to mcp.run()
         else:
             print(
                 "Starting Jenkins MCP Server (FastMCP) with stdio transport...",
@@ -491,15 +482,20 @@ def main():
 
         sys.stderr.flush()
 
-        # Set environment variables for HTTP transports (FastMCP reads these)
         if args.transport in ["sse", "streamable-http"]:
-            import os
+            # FastMCP uses settings.host/settings.port for HTTP transports.
+            server.settings.host = args.host
+            server.settings.port = args.port
 
-            os.environ["UVICORN_HOST"] = args.host
-            os.environ["UVICORN_PORT"] = str(args.port)
-            server.run(transport=args.transport, mount_path=args.mount_path)
+            if args.transport == "streamable-http":
+                # Streamable HTTP uses settings.streamable_http_path (not run(mount_path=...))
+                server.settings.streamable_http_path = args.mount_path
+                server.run(transport=args.transport)
+            else:
+                # For SSE, FastMCP.run(mount_path=...) is used to construct the message endpoint.
+                server.run(transport=args.transport, mount_path=args.mount_path)
         else:
-            server.run(transport=args.transport, mount_path=args.mount_path)
+            server.run(transport=args.transport)
     except KeyboardInterrupt:
         print(
             "\nJenkins MCP Server shutting down due to KeyboardInterrupt...",
