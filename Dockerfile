@@ -21,6 +21,9 @@ COPY ./ ./
 # Install the package
 RUN pip3 install -r requirements.txt
 RUN pip3 install -e .
+
+# Sanity check: ensure the MCP SDK is importable (prevents runtime failures like "No module named 'mcp'")
+RUN python3 -c "import mcp; from mcp.server.fastmcp import FastMCP; print('✅ MCP SDK import OK')"
 # Copy configuration
 COPY config/ ./config/
 

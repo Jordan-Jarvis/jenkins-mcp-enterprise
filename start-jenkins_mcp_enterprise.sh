@@ -1,11 +1,24 @@
 #!/bin/bash
 
 # Jenkins MCP Enterprise Docker Startup Script
-# This script starts the complete Jenkins MCP stack with Qdrant and proxy
+# This script starts the Jenkins MCP stack with Qdrant (optional) using Docker Compose.
 
-set -e
+set -euo pipefail
 
 echo "🚀 Starting Jenkins MCP Enterprise Stack..."
+
+# Detect Docker Compose command (plugin preferred)
+if docker compose version >/dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker-compose)
+else
+    echo "❌ Error: Docker Compose is not installed."
+    echo "Install Docker Desktop (recommended) or the Docker Compose plugin."
+    exit 1
+fi
+
+COMPOSE_FILE="docker-compose.yml"
 
 # Check if config file exists
 if [ ! -f "config/mcp-config.yml" ]; then
@@ -34,41 +47,44 @@ if [ ! -s "config/mcp-config.yml" ]; then
 fi
 
 # Check if proxy config exists  
-if [ ! -f "mcpconfig.docker.json" ]; then
-    echo "❌ Error: mcpconfig.docker.json not found!"
-    echo "Please create the MCP proxy configuration file."
-    exit 1
-fi
-
-echo "✅ Configuration files found"
+echo "✅ Configuration file found"
 echo "📦 Building and starting containers..."
 
-# Start the stack (rebuild to pick up changes)
-docker-compose -f docker-compose.yml build --no-cache
-docker-compose -f docker-compose.yml up -d
+# Start the stack (build to pick up changes)
+"${DOCKER_COMPOSE[@]}" -f "$COMPOSE_FILE" up -d --build
 
 echo "⏳ Waiting for services to be healthy..."
 
 # Wait for Qdrant to be ready
-echo "   Waiting for Qdrant..."
-timeout 60 bash -c 'until curl -s http://localhost:6333/healthz > /dev/null; do sleep 2; done' || {
-    echo "❌ Qdrant failed to start"
-    docker-compose -f docker-compose.yml logs qdrant
+if "${DOCKER_COMPOSE[@]}" -f "$COMPOSE_FILE" config --services | grep -qx "qdrant"; then
+    echo "   Waiting for Qdrant..."
+    timeout 60 bash -c 'until curl -sf http://localhost:6333/health > /dev/null; do sleep 2; done' || {
+        echo "❌ Qdrant failed to start"
+        "${DOCKER_COMPOSE[@]}" -f "$COMPOSE_FILE" logs qdrant
+        exit 1
+    }
+fi
+
+# Wait for server health endpoint (provided by FastMCP custom route)
+echo "   Waiting for MCP server..."
+timeout 60 bash -c 'until curl -sf http://localhost:8000/health > /dev/null; do sleep 2; done' || {
+    echo "❌ MCP server failed to start"
+    "${DOCKER_COMPOSE[@]}" -f "$COMPOSE_FILE" logs jenkins_mcp_enterprise-server
     exit 1
 }
 
 echo "✅ Services started successfully!"
 echo ""
 echo "🌐 Access points:"
+echo "   - MCP Server (streamable HTTP): http://localhost:8000/mcp"
+echo "   - MCP Server health: http://localhost:8000/health"
 echo "   - Qdrant Dashboard: http://localhost:6333/dashboard"
-echo "   - MCP Proxy: http://localhost:3006"
-echo ""
 echo "📊 Service Status:"
-docker-compose -f docker-compose.yml ps
+"${DOCKER_COMPOSE[@]}" -f "$COMPOSE_FILE" ps
 
 echo ""
 echo "📋 To stop the stack:"
-echo "   docker-compose -f docker-compose.yml down"
+echo "   ${DOCKER_COMPOSE[*]} -f $COMPOSE_FILE down"
 echo ""
 echo "📋 To view logs:"
-echo "   docker-compose -f docker-compose.yml logs -f [service-name]"
+echo "   ${DOCKER_COMPOSE[*]} -f $COMPOSE_FILE logs -f [service-name]"
