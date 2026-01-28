@@ -15,11 +15,16 @@ logger = get_component_logger("jenkins.connection")
 class JenkinsConnectionManager:
     """Manages Jenkins connection and authentication"""
 
-    def __init__(self, config: JenkinsConfig):
+    def __init__(self, config: JenkinsConfig, *, validate_on_init: bool = False):
         self.config = config
         self._client: Optional[jenkins.Jenkins] = None
         self._session: Optional[requests.Session] = None
         self._initialize_connection()
+
+        # Optional: validate connectivity/auth immediately (fail-fast).
+        # Default is lazy validation so the server can start even if Jenkins is temporarily unavailable.
+        if validate_on_init:
+            self._validate_connection()
 
     def _initialize_connection(self) -> None:
         """Initialize Jenkins client and HTTP session"""
@@ -29,11 +34,6 @@ class JenkinsConnectionManager:
                 username=self.config.username,
                 password=self.config.token,
             )
-
-            # Test connection
-            whoami = self._client.get_whoami()
-            logger.info(f"Connected to Jenkins as: {whoami}")
-
         except Exception as e:
             raise JenkinsConnectionError(f"Failed to connect to Jenkins: {e}") from e
 
@@ -42,6 +42,19 @@ class JenkinsConnectionManager:
         if self.config.username and self.config.token:
             self._session.auth = (self.config.username, self.config.token)
         self._session.verify = self.config.verify_ssl
+
+        logger.info(
+            "Initialized Jenkins client (lazy connect) for %s",
+            self.config.url,
+        )
+
+    def _validate_connection(self) -> None:
+        """Validate that Jenkins is reachable/auth is valid by calling a lightweight API."""
+        try:
+            whoami = self.client.get_whoami()
+            logger.info("Connected to Jenkins as: %s", whoami)
+        except Exception as e:
+            raise JenkinsConnectionError(f"Failed to connect to Jenkins: {e}") from e
 
     @property
     def client(self) -> jenkins.Jenkins:
@@ -60,7 +73,7 @@ class JenkinsConnectionManager:
     def test_connection(self) -> bool:
         """Test if the Jenkins connection is working"""
         try:
-            self.client.get_whoami()
+            self._validate_connection()
             return True
         except Exception as e:
             logger.error(f"Connection test failed: {e}")
