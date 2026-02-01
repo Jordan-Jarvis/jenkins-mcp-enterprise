@@ -17,6 +17,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Optional: build a vector-enabled image (installs heavy deps) when true.
+        # Example:
+        #   INSTALL_VECTOR_DEPS=true docker compose up -d --build
+        INSTALL_VECTOR_DEPS: ${INSTALL_VECTOR_DEPS:-false}
     container_name: jenkins_mcp_enterprise-server
     ports:
       - "8000:8000"
@@ -26,7 +31,9 @@ services:
       - LOG_LEVEL=INFO
       - UVICORN_HOST=0.0.0.0
       - UVICORN_PORT=8000
-      - DISABLE_VECTOR_SEARCH=true  # Set to false to enable vector search with Qdrant
+      # Vector search is disabled by default (keeps installs small and fast).
+      # To enable, build with INSTALL_VECTOR_DEPS=true and run with DISABLE_VECTOR_SEARCH=false.
+      - DISABLE_VECTOR_SEARCH=${DISABLE_VECTOR_SEARCH:-true}
     volumes:
       - jenkins_mcp_enterprise_cache:/tmp/mcp-jenkins
       - ./config:/app/config:ro
