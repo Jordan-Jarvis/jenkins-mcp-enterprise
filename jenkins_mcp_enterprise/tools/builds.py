@@ -253,7 +253,7 @@ class GetBuildInfoTool(JenkinsOperationTool):
                 return {
                     "job_name": normalized_job,
                     "jenkins_url": jenkins_url,
-                    "build_number": build_number,
+                    "requested_build_number": build_number,
                     "api_url": api_url,
                     "error": (
                         "Build not found (HTTP 404). The job may not exist, "
@@ -267,7 +267,7 @@ class GetBuildInfoTool(JenkinsOperationTool):
             return {
                 "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
-                "build_number": build_number,
+                "requested_build_number": build_number,
                 "api_url": api_url,
                 "error": f"Jenkins API request failed: {str(e)}",
             }
@@ -275,7 +275,7 @@ class GetBuildInfoTool(JenkinsOperationTool):
             return {
                 "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
-                "build_number": build_number,
+                "requested_build_number": build_number,
                 "api_url": api_url,
                 "error": f"Invalid JSON response from Jenkins: {str(e)}",
             }

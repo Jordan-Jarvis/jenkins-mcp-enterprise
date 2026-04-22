@@ -274,7 +274,7 @@ semantic_search "authentication timeout build"
 # Ranked by relevance, not just keyword matching
 ```
 
-## 🔧 **Available Tools** (12 Total)
+## 🔧 **Available Tools** (11–12 depending on vector search)
 
 ### 🤖 **AI & Diagnostic Tools**
 | Tool | Purpose | Unique Features |

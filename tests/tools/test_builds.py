@@ -476,6 +476,10 @@ class TestGetBuildInfoToolExecution:
         assert "error" in data
         assert "404" in data["error"]
         assert "build" not in data
+        # Error payload must echo the requested build number under the same
+        # key used by the success payload (see PR #28 review feedback).
+        assert data["requested_build_number"] == 999
+        assert "build_number" not in data
 
     def test_request_exception_is_captured(self):
         client = _make_jenkins_client(
@@ -489,8 +493,13 @@ class TestGetBuildInfoToolExecution:
         )
 
         assert result.success is True
-        assert "Jenkins API request failed" in result.data["error"]
-        assert "slow jenkins" in result.data["error"]
+        data = result.data
+        assert "Jenkins API request failed" in data["error"]
+        assert "slow jenkins" in data["error"]
+        # No explicit build_number was passed, so the lastBuild path is used
+        # and requested_build_number is None.
+        assert data["requested_build_number"] is None
+        assert "build_number" not in data
 
     def test_invalid_json_is_captured(self):
         response = _make_response(raise_on_json=ValueError("bad payload"))
@@ -503,7 +512,10 @@ class TestGetBuildInfoToolExecution:
         )
 
         assert result.success is True
-        assert "Invalid JSON response" in result.data["error"]
+        data = result.data
+        assert "Invalid JSON response" in data["error"]
+        assert data["requested_build_number"] is None
+        assert "build_number" not in data
 
     def test_multi_instance_resolution_failure(self):
         manager = MagicMock()
