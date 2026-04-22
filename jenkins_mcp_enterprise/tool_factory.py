@@ -15,6 +15,7 @@ from typing import Dict
 
 from .base import Tool
 from .di_container import DIContainer
+from .tools.builds import GetBuildInfoTool, ListJobBuildsTool
 from .tools.diagnostics import DiagnoseBuildFailureTool
 from .tools.jenkins_tools import GetJobParametersTool
 from .tools.logs import FilterErrorsTool, LogContextTool
@@ -76,6 +77,16 @@ class ToolFactory:
             jenkins_client=jenkins_client, multi_jenkins_manager=multi_jenkins_manager
         )
         tools[get_params_tool.name] = get_params_tool
+
+        list_builds_tool = ListJobBuildsTool(
+            jenkins_client=jenkins_client, multi_jenkins_manager=multi_jenkins_manager
+        )
+        tools[list_builds_tool.name] = list_builds_tool
+
+        get_build_info_tool = GetBuildInfoTool(
+            jenkins_client=jenkins_client, multi_jenkins_manager=multi_jenkins_manager
+        )
+        tools[get_build_info_tool.name] = get_build_info_tool
 
         # Tools requiring JenkinsClient and CacheManager (now with multi-instance support)
         async_tool = AsyncBuildTool(
@@ -174,7 +185,7 @@ class ToolFactory:
             The number of tools this factory creates
         """
         # Base tools count (without vector search tools)
-        base_count = 9
+        base_count = 11
 
         # Add vector search tools if enabled
         vector_manager = self.container.get_vector_manager()
