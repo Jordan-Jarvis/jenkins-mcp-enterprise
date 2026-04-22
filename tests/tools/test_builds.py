@@ -82,12 +82,6 @@ def _make_jenkins_client(
 
 
 class TestClampCount:
-    def test_default_when_none(self):
-        assert _clamp_count(None) == DEFAULT_LIST_COUNT
-
-    def test_default_when_non_numeric(self):
-        assert _clamp_count("not-a-number") == DEFAULT_LIST_COUNT
-
     def test_clamps_below_min(self):
         assert _clamp_count(0) == MIN_LIST_COUNT
         assert _clamp_count(-50) == MIN_LIST_COUNT
@@ -305,7 +299,7 @@ class TestListJobBuildsToolExecution:
         assert result.success is True
         assert "Invalid JSON response" in result.data["error"]
 
-    def test_missing_required_param_raises(self):
+    def test_missing_required_param_returns_error_result(self):
         client = _make_jenkins_client()
         tool = ListJobBuildsTool(jenkins_client=client)
 

@@ -30,19 +30,24 @@ MAX_LIST_COUNT = 500
 MIN_LIST_COUNT = 1
 
 
-def _clamp_count(value: Any) -> int:
-    """Coerce ``count`` to a safe int within ``[MIN_LIST_COUNT, MAX_LIST_COUNT]``."""
-    try:
-        n = int(value) if value is not None else DEFAULT_LIST_COUNT
-    except (TypeError, ValueError):
-        n = DEFAULT_LIST_COUNT
-    return max(MIN_LIST_COUNT, min(n, MAX_LIST_COUNT))
+def _clamp_count(value: int) -> int:
+    """Clamp ``count`` to ``[MIN_LIST_COUNT, MAX_LIST_COUNT]``.
+
+    ``ParameterSpec("count", int, ..., default=DEFAULT_LIST_COUNT)`` at the
+    tool boundary guarantees numeric input and supplies the default when the
+    parameter is omitted, so this helper only has to enforce the range.
+    """
+    return max(MIN_LIST_COUNT, min(int(value), MAX_LIST_COUNT))
 
 
 class ListJobBuildsTool(JenkinsOperationTool):
     """Lists recent builds of a Jenkins job with metadata for filtering."""
 
-    def __init__(self, jenkins_client: JenkinsClient, multi_jenkins_manager=None):
+    def __init__(
+        self,
+        jenkins_client: Optional[JenkinsClient] = None,
+        multi_jenkins_manager=None,
+    ):
         super().__init__(
             jenkins_client=jenkins_client,
             multi_jenkins_manager=multi_jenkins_manager,
@@ -161,7 +166,11 @@ class ListJobBuildsTool(JenkinsOperationTool):
 class GetBuildInfoTool(JenkinsOperationTool):
     """Fetches metadata for a single Jenkins build (or ``lastBuild``)."""
 
-    def __init__(self, jenkins_client: JenkinsClient, multi_jenkins_manager=None):
+    def __init__(
+        self,
+        jenkins_client: Optional[JenkinsClient] = None,
+        multi_jenkins_manager=None,
+    ):
         super().__init__(
             jenkins_client=jenkins_client,
             multi_jenkins_manager=multi_jenkins_manager,
