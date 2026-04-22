@@ -331,13 +331,16 @@ class TestListJobBuildsToolExecution:
         tool = ListJobBuildsTool(jenkins_client=None, multi_jenkins_manager=manager)
 
         result = tool.execute(
-            job_name="my-pipeline",
+            job_name="/job/TeamA/job/my-pipeline",
             jenkins_url="https://unknown.example.com",
         )
 
         assert result.success is True  # structured error, not a raised exception
         assert "resolution failed" in result.data["error"]
         assert "instructions" in result.data
+        # The resolution-failure path must echo the normalized job_name so
+        # callers read a stable value across success and error responses.
+        assert result.data["job_name"] == "TeamA/my-pipeline"
 
     def test_multi_instance_resolution_routes_to_resolved_client(self):
         response = _make_response(json_payload={"builds": []})
@@ -534,7 +537,7 @@ class TestGetBuildInfoToolExecution:
         tool = GetBuildInfoTool(jenkins_client=None, multi_jenkins_manager=manager)
 
         result = tool.execute(
-            job_name="my-pipeline",
+            job_name="/job/TeamA/job/my-pipeline",
             jenkins_url="https://unknown.example.com",
             build_number=1,
         )
@@ -542,6 +545,9 @@ class TestGetBuildInfoToolExecution:
         assert result.success is True
         assert "resolution failed" in result.data["error"]
         assert "instructions" in result.data
+        # Resolution-failure path echoes the normalized job_name, matching
+        # the success and HTTP-error payloads.
+        assert result.data["job_name"] == "TeamA/my-pipeline"
 
 
 # ---------------------------------------------------------------------------

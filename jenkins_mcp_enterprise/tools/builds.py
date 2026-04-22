@@ -102,21 +102,22 @@ class ListJobBuildsTool(JenkinsOperationTool):
         effective_count = _clamp_count(kwargs.get("count"))
         tree_override = (kwargs.get("tree") or "").strip()
 
+        # Compute the canonical echo up-front so every return path shows the
+        # same job_name value. to_jenkins_api_path() normalizes internally,
+        # so pass raw input there and reuse normalized_job only in responses.
+        normalized_job = JobNameParser.normalize_job_name(job_name)
+
         try:
             instance_id = self.resolve_jenkins_instance(jenkins_url)
             jenkins_client = self.get_jenkins_client(instance_id)
         except Exception as e:
             return {
-                "job_name": job_name,
+                "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
                 "error": f"Jenkins instance resolution failed: {str(e)}",
                 "instructions": self.get_instance_instructions(),
             }
 
-        # to_jenkins_api_path() normalizes internally; pass raw input and
-        # keep a single explicit normalize_job_name() call for the
-        # response's canonical echo.
-        normalized_job = JobNameParser.normalize_job_name(job_name)
         api_job_path = JobNameParser.to_jenkins_api_path(job_name)
         base_url = jenkins_client.config.url.rstrip("/")
         base_tree = tree_override if tree_override else DEFAULT_LIST_TREE
@@ -236,21 +237,22 @@ class GetBuildInfoTool(JenkinsOperationTool):
         depth = kwargs.get("depth") if kwargs.get("depth") is not None else 1
         tree_override = (kwargs.get("tree") or "").strip()
 
+        # Compute the canonical echo up-front so every return path shows the
+        # same job_name value. to_jenkins_api_path() normalizes internally,
+        # so pass raw input there and reuse normalized_job only in responses.
+        normalized_job = JobNameParser.normalize_job_name(job_name)
+
         try:
             instance_id = self.resolve_jenkins_instance(jenkins_url)
             jenkins_client = self.get_jenkins_client(instance_id)
         except Exception as e:
             return {
-                "job_name": job_name,
+                "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
                 "error": f"Jenkins instance resolution failed: {str(e)}",
                 "instructions": self.get_instance_instructions(),
             }
 
-        # to_jenkins_api_path() normalizes internally; pass raw input and
-        # keep a single explicit normalize_job_name() call for the
-        # response's canonical echo.
-        normalized_job = JobNameParser.normalize_job_name(job_name)
         api_job_path = JobNameParser.to_jenkins_api_path(job_name)
         base_url = jenkins_client.config.url.rstrip("/")
         build_segment = str(build_number) if build_number is not None else "lastBuild"

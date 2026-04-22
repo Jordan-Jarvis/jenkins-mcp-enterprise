@@ -280,7 +280,7 @@ semantic_search "authentication timeout build"
 | Tool | Purpose | Unique Features |
 |------|---------|-----------------|
 | `diagnose_build_failure` | **AI failure analysis** | Sub-build hierarchy, semantic search, custom recommendations |
-| `semantic_search` | **Vector-powered search** | Cross-build pattern recognition, relevance ranking |
+| `semantic_search` | **Vector-powered search** *(requires vector search enabled)* | Cross-build pattern recognition, relevance ranking |
 
 ### 🚀 **Build Management Tools**
 | Tool | Purpose | Unique Features |
