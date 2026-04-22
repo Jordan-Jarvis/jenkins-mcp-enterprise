@@ -92,9 +92,6 @@ class TestClampCount:
     def test_passthrough_valid(self):
         assert _clamp_count(50) == 50
 
-    def test_coerces_numeric_string(self):
-        assert _clamp_count("42") == 42
-
 
 # ---------------------------------------------------------------------------
 # ListJobBuildsTool — static metadata
@@ -156,7 +153,8 @@ class TestListJobBuildsToolExecution:
         assert result.success is True
         data = result.data
         assert data["job_name"] == "TeamA/my-pipeline"
-        assert data["count"] == 2
+        assert data["requested_count"] == DEFAULT_LIST_COUNT
+        assert data["returned_count"] == 2
         assert len(data["builds"]) == 2
 
         call = client.connection.session.get.call_args
@@ -167,6 +165,23 @@ class TestListJobBuildsToolExecution:
             f"{DEFAULT_LIST_TREE}{{0,{DEFAULT_LIST_COUNT}}}"
         )
         assert call.kwargs["timeout"] == client.config.timeout
+
+    def test_numeric_string_count_is_coerced_via_parameter_spec(self):
+        """ParameterSpec(int) coerces ``count="42"`` to int before _clamp_count."""
+        response = _make_response(json_payload={"builds": []})
+        client = _make_jenkins_client(get_response=response)
+        tool = ListJobBuildsTool(jenkins_client=client)
+
+        result = tool.execute(
+            job_name="my-pipeline",
+            jenkins_url="https://jenkins.example.com",
+            count="42",
+        )
+
+        assert result.success is True
+        tree_arg = client.connection.session.get.call_args.kwargs["params"]["tree"]
+        assert tree_arg.endswith("{0,42}")
+        assert result.data["requested_count"] == 42
 
     def test_custom_count_is_applied_and_clamped(self):
         response = _make_response(json_payload={"builds": []})
@@ -255,7 +270,7 @@ class TestListJobBuildsToolExecution:
 
         assert result.success is True
         assert result.data["builds"] == []
-        assert result.data["count"] == 0
+        assert result.data["returned_count"] == 0
 
     def test_404_returns_structured_error(self):
         response = _make_response(status_code=404, json_payload={})

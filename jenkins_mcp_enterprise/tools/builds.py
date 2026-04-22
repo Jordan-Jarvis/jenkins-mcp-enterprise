@@ -34,10 +34,10 @@ def _clamp_count(value: int) -> int:
     """Clamp ``count`` to ``[MIN_LIST_COUNT, MAX_LIST_COUNT]``.
 
     ``ParameterSpec("count", int, ..., default=DEFAULT_LIST_COUNT)`` at the
-    tool boundary guarantees numeric input and supplies the default when the
-    parameter is omitted, so this helper only has to enforce the range.
+    tool boundary coerces numeric strings to ``int`` and supplies the default
+    when the parameter is omitted, so this helper only has to enforce range.
     """
-    return max(MIN_LIST_COUNT, min(int(value), MAX_LIST_COUNT))
+    return max(MIN_LIST_COUNT, min(value, MAX_LIST_COUNT))
 
 
 class ListJobBuildsTool(JenkinsOperationTool):
@@ -99,7 +99,7 @@ class ListJobBuildsTool(JenkinsOperationTool):
     def _execute_impl(self, **kwargs) -> Dict[str, Any]:
         job_name = kwargs["job_name"]
         jenkins_url = kwargs["jenkins_url"]
-        count = _clamp_count(kwargs.get("count"))
+        effective_count = _clamp_count(kwargs.get("count"))
         tree_override = (kwargs.get("tree") or "").strip()
 
         try:
@@ -113,11 +113,14 @@ class ListJobBuildsTool(JenkinsOperationTool):
                 "instructions": self.get_instance_instructions(),
             }
 
+        # to_jenkins_api_path() normalizes internally; pass raw input and
+        # keep a single explicit normalize_job_name() call for the
+        # response's canonical echo.
         normalized_job = JobNameParser.normalize_job_name(job_name)
-        api_job_path = JobNameParser.to_jenkins_api_path(normalized_job)
+        api_job_path = JobNameParser.to_jenkins_api_path(job_name)
         base_url = jenkins_client.config.url.rstrip("/")
         base_tree = tree_override if tree_override else DEFAULT_LIST_TREE
-        tree_value = f"{base_tree}{{0,{count}}}"
+        tree_value = f"{base_tree}{{0,{effective_count}}}"
         api_url = f"{base_url}/{api_job_path}/api/json"
 
         try:
@@ -158,7 +161,8 @@ class ListJobBuildsTool(JenkinsOperationTool):
             "job_name": normalized_job,
             "jenkins_url": jenkins_url,
             "tree": tree_value,
-            "count": len(builds),
+            "requested_count": effective_count,
+            "returned_count": len(builds),
             "builds": builds,
         }
 
@@ -243,8 +247,11 @@ class GetBuildInfoTool(JenkinsOperationTool):
                 "instructions": self.get_instance_instructions(),
             }
 
+        # to_jenkins_api_path() normalizes internally; pass raw input and
+        # keep a single explicit normalize_job_name() call for the
+        # response's canonical echo.
         normalized_job = JobNameParser.normalize_job_name(job_name)
-        api_job_path = JobNameParser.to_jenkins_api_path(normalized_job)
+        api_job_path = JobNameParser.to_jenkins_api_path(job_name)
         base_url = jenkins_client.config.url.rstrip("/")
         build_segment = str(build_number) if build_number is not None else "lastBuild"
         api_url = f"{base_url}/{api_job_path}/{build_segment}/api/json"
