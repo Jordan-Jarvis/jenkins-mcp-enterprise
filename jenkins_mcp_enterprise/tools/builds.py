@@ -45,7 +45,7 @@ class ListJobBuildsTool(JenkinsOperationTool):
 
     def __init__(
         self,
-        jenkins_client: Optional[JenkinsClient] = None,
+        jenkins_client: JenkinsClient,
         multi_jenkins_manager=None,
     ):
         super().__init__(
@@ -60,11 +60,13 @@ class ListJobBuildsTool(JenkinsOperationTool):
     @property
     def description(self) -> str:
         return (
-            "📋 LIST BUILDS: Returns recent builds for a Jenkins job with metadata "
+            "Returns recent builds for a Jenkins job with metadata "
             "(number, result, timestamp, duration, description, displayName, url), "
             "so callers can pick a specific build by criteria before calling "
-            "log-analysis tools. IMPORTANT: jenkins_url is required because jobs "
-            "are load-balanced across multiple Jenkins servers."
+            "log-analysis tools. Queries a single Jenkins instance per call "
+            "(resolved from `jenkins_url`); does not aggregate across configured "
+            "instances. IMPORTANT: jenkins_url is required because jobs are "
+            "load-balanced across multiple Jenkins servers."
         )
 
     @property
@@ -173,7 +175,7 @@ class GetBuildInfoTool(JenkinsOperationTool):
 
     def __init__(
         self,
-        jenkins_client: Optional[JenkinsClient] = None,
+        jenkins_client: JenkinsClient,
         multi_jenkins_manager=None,
     ):
         super().__init__(
@@ -188,9 +190,11 @@ class GetBuildInfoTool(JenkinsOperationTool):
     @property
     def description(self) -> str:
         return (
-            "ℹ️ BUILD INFO: Returns metadata for a single Jenkins build (number, "
-            "result, timestamp, duration, description, parameters, url, ...). "
-            "When build_number is omitted, the job's 'lastBuild' is returned. "
+            "Returns metadata for a single Jenkins build (number, result, "
+            "timestamp, duration, description, parameters, url, ...). When "
+            "build_number is omitted, the job's 'lastBuild' is returned. "
+            "Queries a single Jenkins instance per call (resolved from "
+            "`jenkins_url`); does not aggregate across configured instances. "
             "IMPORTANT: jenkins_url is required because jobs are load-balanced "
             "across multiple Jenkins servers."
         )
