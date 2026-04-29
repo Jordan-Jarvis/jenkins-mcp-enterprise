@@ -274,13 +274,13 @@ semantic_search "authentication timeout build"
 # Ranked by relevance, not just keyword matching
 ```
 
-## 🔧 **Available Tools** (10 Total)
+## 🔧 **Available Tools** (11–12 depending on vector search)
 
 ### 🤖 **AI & Diagnostic Tools**
 | Tool | Purpose | Unique Features |
 |------|---------|-----------------|
 | `diagnose_build_failure` | **AI failure analysis** | Sub-build hierarchy, semantic search, custom recommendations |
-| `semantic_search` | **Vector-powered search** | Cross-build pattern recognition, relevance ranking |
+| `semantic_search` | **Vector-powered search** *(requires vector search enabled)* | Cross-build pattern recognition, relevance ranking |
 
 ### 🚀 **Build Management Tools**
 | Tool | Purpose | Unique Features |
@@ -289,6 +289,8 @@ semantic_search "authentication timeout build"
 | `trigger_build_async` | **Asynchronous build triggering** | Non-blocking execution, parallel builds |
 | `trigger_build_with_subs` | **Sub-build monitoring** | Real-time status tracking, hierarchy discovery |
 | `get_jenkins_job_parameters` | **Job parameter discovery** | Multi-instance support, parameter details |
+| `list_job_builds` | **Enumerate recent builds** | Tree-filter metadata (number, result, timestamp, duration, description) for build selection |
+| `get_build_info` | **Single build metadata** | Supports explicit build numbers and `lastBuild` with optional `depth`/`tree` |
 
 ### 🔍 **Log Analysis & Search Tools**
 | Tool | Purpose | Unique Features |
