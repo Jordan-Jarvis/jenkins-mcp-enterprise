@@ -51,4 +51,3 @@ def test_streamable_http_cli_applies_host_port_and_path(monkeypatch):
     assert dummy.settings.port == 1234
     assert dummy.settings.streamable_http_path == "/custom"
     assert dummy.run_calls == [{"transport": "streamable-http", "mount_path": None}]
-
