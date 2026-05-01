@@ -1,8 +1,8 @@
-# 🚀 Jenkins MCP Server Enterprise
+# Jenkins MCP Server Enterprise
 
-> **The most advanced Jenkins MCP server available** - Built for enterprise debugging, multi-instance management, and AI-powered failure analysis.
+> Jenkins MCP server for multi-instance routing, build diagnostics, and optional vector search.
 
-A production-ready Model Context Protocol (MCP) server that transforms how AI assistants interact with Jenkins. Unlike basic Jenkins integrations, this server provides **enterprise-grade debugging capabilities**, **intelligent failure analysis**, and **unprecedented pipeline visibility**.
+A Model Context Protocol (MCP) server for Jenkins that provides build management, log inspection, failure diagnostics, and multi-instance configuration. The setup paths documented here are the ones maintained in this repository today: source install and Docker/Compose.
 
 ## 🌟 Why Choose This Over Other Jenkins MCP Servers?
 
@@ -14,9 +14,9 @@ A production-ready Model Context Protocol (MCP) server that transforms how AI as
 - **Dynamic Message Generation**: Extract specific error codes, versions, and timestamps from build logs automatically
 
 ### 🏢 **Enterprise Multi-Jenkins Support**
-- **Load-Balanced Routing**: Automatic instance selection across multiple Jenkins servers
-- **Centralized Management**: Single MCP server manages dozens of Jenkins instances
-- **Instance Health Monitoring**: Automatic failover and health checks
+- **URL-Based Routing**: Resolve each request to a configured Jenkins instance from `jenkins_url`
+- **Centralized Management**: Single MCP server manages multiple configured Jenkins instances
+- **Instance Health Checks**: Inspect configured-instance health without embedding credentials in prompts
 - **Flexible Authentication**: Per-instance credentials and SSL configuration
 
 ### 🧠 **Configurable AI Diagnostics**
@@ -48,49 +48,47 @@ A production-ready Model Context Protocol (MCP) server that transforms how AI as
 - **Jenkins API access** (any version with Pipeline plugin)
 - **Jenkins API token** (generate from user profile)
 
-### ⚡ **60-Second Setup**
+### Tested setup paths
 
-**Option 1: Install from PyPI (Recommended)**
+The source install and Docker/Compose flows below are the maintained setup paths. A plain `pip install jenkins_mcp_enterprise` may work, but it does not include the repository config/examples and is not the primary documented flow here.
+
+**Option 1: Install from Source (Recommended)**
 ```bash
-# 1. Install the package
-pip install jenkins_mcp_enterprise
-
-# Optional: enable vector/semantic search (large ML deps; not installed by default)
-# pip install "jenkins_mcp_enterprise[vector]"
-
-# 2. Create configuration file
-mkdir -p config
-cp config/mcp-config.example.yml config/mcp-config.yml
-```
-
-**Option 2: Install from Source**
-```bash
-# 1. Clone and install
+# 1. Clone the repository
 git clone https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise
-cd jenkins-mcp
+cd jenkins-mcp-enterprise
+
+# 2. Create a virtualenv and install the package
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
 python3 -m pip install -e .
 
-# 2. (Optional) Enable semantic/vector search
-# Note: this installs large ML dependencies and runs a local Qdrant instance.
-# If you skip this, vector search stays disabled by default.
-python3 -m pip install -e ".[vector]"
-./scripts/start_dev_environment.sh
+# 3. Create your config file from the checked-in example
+cp config/mcp-config.example.yml config/mcp-config.yml
 
-# 3. Configure your Jenkins instances
-cat > config/mcp-config.yml << 'EOF'
-jenkins_instances:
-  production:
-    url: "https://jenkins.yourcompany.com"
-    username: "your.email@company.com"
-    token: "your-api-token"
-    display_name: "Production Jenkins"
-settings:
-  fallback_instance: "production"
-EOF
+# 4. Edit config/mcp-config.yml with your Jenkins URLs and credentials
 
-# 4. Launch the server
+# 5. Launch the server
 jenkins_mcp_enterprise --config config/mcp-config.yml
 ```
+
+**Optional: Enable vector/semantic search**
+```bash
+# Install optional vector dependencies
+python3 -m pip install -e ".[vector]"
+
+# Start a local Qdrant instance for development
+./scripts/start_dev_environment.sh
+```
+
+**Option 2: Run with Docker Compose**
+```bash
+cp config/mcp-config.example.yml config/mcp-config.yml
+./start-jenkins_mcp_enterprise.sh
+```
+
+See [README-Docker.md](README-Docker.md) for the full Docker deployment guide.
 
 ### 🎯 **Connect to Claude Desktop**
 
@@ -411,7 +409,7 @@ We welcome contributions! This project uses:
 ```bash
 # Development setup
 git clone https://github.com/Jordan-Jarvis/jenkins-mcp-enterprise
-cd jenkins-mcp
+cd jenkins-mcp-enterprise
 python3 -m pip install -e .
 ./scripts/start_dev_environment.sh
 
