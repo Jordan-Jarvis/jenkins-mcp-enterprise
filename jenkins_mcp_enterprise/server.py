@@ -32,7 +32,12 @@ tool_instances = None
 mcp = None
 
 
-def create_server(config=None, config_file_path=None) -> FastMCP:
+def create_server(
+    config=None,
+    config_file_path=None,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+) -> FastMCP:
     """Create and configure the MCP server"""
     # Setup logging
     setup_logging()
@@ -42,15 +47,8 @@ def create_server(config=None, config_file_path=None) -> FastMCP:
     tool_factory = ToolFactory(container)
     tools = tool_factory.create_tools()
 
-    # Create FastMCP server with settings for HTTP transport
-    mcp = FastMCP("Jenkins MCP Server")
-
-    # Add health check endpoint for Docker health checks
-    @mcp.custom_route("/health", methods=["GET"])
-    async def health_check(request):
-        from starlette.responses import PlainTextResponse
-
-        return PlainTextResponse("OK")
+    # Create FastMCP server
+    mcp = FastMCP("Jenkins MCP Server", host=host, port=port)
 
     # Get multi-Jenkins manager for roots support
     multi_jenkins_manager = container.get_multi_jenkins_manager()
@@ -66,192 +64,54 @@ def create_server(config=None, config_file_path=None) -> FastMCP:
 
 
 def register_jenkins_resources(mcp: FastMCP, multi_jenkins_manager) -> None:
-    """Register MCP resources that describe configured Jenkins instances.
+    """Register MCP resources for Jenkins URL to credentials mapping"""
 
-    Notes:
-    - Tools in this server resolve Jenkins routing by matching a provided base URL
-      (see [`MultiJenkinsManager.resolve_jenkins_url()`](jenkins_mcp_enterprise/multi_jenkins_manager.py:244)).
-    - These resources are intentionally metadata-only and must not expose secrets.
-    """
-
-    import re
-    import urllib.parse
-
-    def _slugify(value: str) -> str:
-        """Convert a display name into a URI-safe, human-friendly key."""
-        value = (value or "").strip().lower()
-        # Replace whitespace with single dashes
-        value = re.sub(r"\s+", "-", value)
-        # Remove characters that are awkward in MCP URIs
-        value = re.sub(r"[^a-z0-9\-_.]", "", value)
-        # Collapse repeated separators
-        value = re.sub(r"-+", "-", value).strip("-._")
-        return value
-
-    def _build_instance_key_map() -> dict:
-        """Build a stable, unique key -> instance_id map.
-
-        We prefer a key derived from display_name for ergonomics, but guarantee
-        uniqueness by suffixing collisions with the instance_id.
-        """
-        key_to_id: dict[str, str] = {}
-        used_keys: set[str] = set()
-
-        for instance_id, cfg in multi_jenkins_manager.instances_config.items():
-            base = cfg.display_name or instance_id
-            key = _slugify(base) or _slugify(instance_id) or instance_id
-
-            if key in used_keys:
-                # Collision: make it unique but still predictable
-                key = f"{key}-{_slugify(instance_id) or instance_id}"
-
-            used_keys.add(key)
-            key_to_id[key] = instance_id
-
-        return key_to_id
-
-    @mcp.resource(
-        "jenkins://instances",
-        name="Jenkins Instances",
-        description="List configured Jenkins instances (metadata only).",
-        mime_type="application/json",
-    )
-    def jenkins_instances() -> dict:
-        """List Jenkins instances as MCP resources.
-
-        Returns URIs of the form: jenkins://instances/{instance_key}
-        """
-        key_to_id = _build_instance_key_map()
-
-        instances = []
-        for key, instance_id in sorted(key_to_id.items(), key=lambda kv: kv[0]):
-            cfg = multi_jenkins_manager.instances_config[instance_id]
-            instances.append(
-                {
-                    "uri": f"jenkins://instances/{key}",
-                    "instance_key": key,
-                    "display_name": cfg.display_name or instance_id,
-                    "url": cfg.url,
-                    "description": cfg.description or "",
-                    "has_credentials": bool(cfg.username and cfg.token),
-                    "verify_ssl": bool(cfg.verify_ssl),
-                    "timeout": int(getattr(cfg, "timeout", 30)),
-                }
-            )
-
-        return {
-            "instances": instances,
-            "total": len(instances),
-            "usage": {
-                "tools": "Pass the Jenkins base URL via the 'jenkins_url' tool argument (preferred).",
-                "resources": "Use the URIs above to read per-instance metadata via resources/read.",
-            },
-        }
-
-    @mcp.resource(
-        "jenkins://instances/{instance_key}",
-        name="Jenkins Instance",
-        description="Read metadata for a single configured Jenkins instance.",
-        mime_type="application/json",
-    )
-    def jenkins_instance(instance_key: str) -> dict:
-        """Return metadata for a single Jenkins instance."""
-        key_to_id = _build_instance_key_map()
-
-        # Support URL-encoded keys just in case clients encode path segments.
-        decoded_key = urllib.parse.unquote(instance_key)
-        instance_id = key_to_id.get(decoded_key) or key_to_id.get(instance_key)
-
-        if not instance_id:
-            return {
-                "status": "not_found",
-                "instance_key": instance_key,
-                "message": "Unknown Jenkins instance key. Read jenkins://instances for valid keys.",
-                "available_instance_keys": sorted(key_to_id.keys()),
-            }
-
-        cfg = multi_jenkins_manager.instances_config[instance_id]
-        return {
-            "status": "configured",
-            "instance_key": decoded_key,
-            "display_name": cfg.display_name or instance_id,
-            "url": cfg.url,
-            "description": cfg.description or "",
-            "has_credentials": bool(cfg.username and cfg.token),
-            "verify_ssl": bool(cfg.verify_ssl),
-            "timeout": int(getattr(cfg, "timeout", 30)),
-        }
-
-    # Also register one *concrete* resource per configured instance so that
-    # `resources/list` contains each instance directly (better UX than relying
-    # on template resources alone).
-    #
-    # Note: This intentionally registers concrete URIs that overlap the template
-    # (`jenkins://instances/{instance_key}`). FastMCP exposes templates via
-    # `resourceTemplates`, but many clients primarily surface `resources`.
-    _startup_key_to_id = _build_instance_key_map()
-    for _instance_key, _instance_id in sorted(
-        _startup_key_to_id.items(), key=lambda kv: kv[0]
-    ):
-        _cfg = multi_jenkins_manager.instances_config[_instance_id]
-        _uri = f"jenkins://instances/{_instance_key}"
-
-        def _make_concrete_instance_reader(instance_key: str):
-            def _reader() -> dict:
-                return jenkins_instance(instance_key)
-
-            return _reader
-
-        mcp.resource(
-            _uri,
-            name=f"Jenkins Instance: {_cfg.display_name or _instance_id}",
-            description=_cfg.description or f"Jenkins instance at {_cfg.url}",
-            mime_type="application/json",
-        )(_make_concrete_instance_reader(_instance_key))
-
-    # Backward compatibility: keep `jenkins://info`, but make it safe and align it with `jenkins://instances`.
-    @mcp.resource(
-        "jenkins://info",
-        name="Jenkins Instances (Legacy)",
-        description="Legacy alias for jenkins://instances (metadata only).",
-        mime_type="application/json",
-    )
+    @mcp.resource("jenkins://info")
     def jenkins_instances_info() -> dict:
-        """Legacy alias for [`jenkins_instances()`](jenkins_mcp_enterprise/server.py:1)."""
-        data = jenkins_instances()
-        data["deprecated"] = {
-            "resource": "jenkins://info",
-            "use_instead": "jenkins://instances",
+        """Lists all available Jenkins instances with their URLs and descriptions"""
+        instances = {}
+        for instance_id, config in multi_jenkins_manager.instances_config.items():
+            instances[instance_id] = {
+                "url": config.url,
+                "display_name": config.display_name or instance_id,
+                "description": config.description or f"Jenkins instance: {config.url}",
+                "username": config.username,
+            }
+        return {
+            "available_instances": instances,
+            "total": len(instances),
+            "usage": "Reference Jenkins instances by URL - credentials will be automatically resolved",
         }
-        return data
 
-    # Legacy/deprecated: this resource is structurally brittle for full URLs (slashes). Keep it for compatibility.
     @mcp.resource("jenkins://resolve/{url}")
     def resolve_jenkins_url(url: str) -> dict:
-        """Resolve a Jenkins URL to a configured instance (deprecated).
+        """Resolves a Jenkins URL to find the corresponding instance configuration"""
+        # Clean up the URL (remove trailing slashes, normalize)
+        clean_url = url.rstrip("/")
+        if not clean_url.startswith(("http://", "https://")):
+            clean_url = f"https://{clean_url}"
 
-        Prefer using tools with 'jenkins_url', or read `jenkins://instances`.
-        """
-        # Accept URL-encoded forms (e.g., https%3A%2F%2Fjenkins.example.com)
-        decoded = urllib.parse.unquote(url)
+        # Find matching instance
+        for instance_id, config in multi_jenkins_manager.instances_config.items():
+            config_url = config.url.rstrip("/")
+            if clean_url == config_url:
+                return {
+                    "instance_id": instance_id,
+                    "url": config.url,
+                    "display_name": config.display_name or instance_id,
+                    "description": config.description,
+                    "username": config.username,
+                    "has_credentials": bool(config.token),
+                    "status": "configured",
+                }
 
-        try:
-            instance_id = multi_jenkins_manager.resolve_jenkins_url(decoded)
-            cfg = multi_jenkins_manager.instances_config[instance_id]
-            return {
-                "status": "configured",
-                "url": cfg.url,
-                "display_name": cfg.display_name or instance_id,
-                "has_credentials": bool(cfg.username and cfg.token),
-                "deprecated": True,
-            }
-        except Exception as e:
-            return {
-                "status": "not_configured",
-                "url": decoded,
-                "message": str(e),
-                "deprecated": True,
-            }
+        return {
+            "instance_id": None,
+            "url": clean_url,
+            "status": "not_configured",
+            "message": f"No credentials configured for {clean_url}",
+            "available_instances": list(multi_jenkins_manager.instances_config.keys()),
+        }
 
 
 def register_tool_with_mcp(mcp: FastMCP, tool) -> None:
@@ -355,12 +215,15 @@ def load_config_from_yaml(config_path: str) -> MCPConfig:
     # configured `jenkins_instances` entry.
     default_inst = config_data.get("default_instance", {})
     if not default_inst:
-        instances = config_data.get("jenkins_instances", {}) or {}
-        fallback_id = (config_data.get("settings", {}) or {}).get("fallback_instance")
-        if fallback_id and fallback_id in instances:
-            default_inst = instances[fallback_id]
-        elif instances:
-            default_inst = next(iter(instances.values()))
+        settings_data = config_data.get("settings", {})
+        jenkins_instances = config_data.get("jenkins_instances", {}) or {}
+        fallback_instance = settings_data.get("fallback_instance")
+
+        if fallback_instance and fallback_instance in jenkins_instances:
+            default_inst = jenkins_instances[fallback_instance]
+        elif jenkins_instances:
+            first_instance_key = next(iter(jenkins_instances))
+            default_inst = jenkins_instances[first_instance_key]
 
     jenkins_config = JenkinsConfig(
         url=default_inst.get("url", ""),
@@ -436,7 +299,7 @@ def main():
         "--mount-path",
         type=str,
         default="/mcp",
-        help="For streamable-http: HTTP path for the MCP endpoint (default: /mcp). For SSE: mount path used for message endpoint construction (default: /mcp).",
+        help="Mount path for HTTP transports (default: /mcp)",
     )
     parser.add_argument(
         "--port",
@@ -477,7 +340,7 @@ def main():
             print(f"Failed to load config from {args.config}: {e}", file=sys.stderr)
             sys.exit(1)
 
-    server = create_server(config, args.config)
+    server = create_server(config, args.config, host=args.host, port=args.port)
 
     try:
         if args.transport in ["sse", "streamable-http"]:
@@ -492,21 +355,7 @@ def main():
             )
 
         sys.stderr.flush()
-
-        if args.transport in ["sse", "streamable-http"]:
-            # FastMCP uses settings.host/settings.port for HTTP transports.
-            server.settings.host = args.host
-            server.settings.port = args.port
-
-            if args.transport == "streamable-http":
-                # Streamable HTTP uses settings.streamable_http_path (not run(mount_path=...))
-                server.settings.streamable_http_path = args.mount_path
-                server.run(transport=args.transport)
-            else:
-                # For SSE, FastMCP.run(mount_path=...) is used to construct the message endpoint.
-                server.run(transport=args.transport, mount_path=args.mount_path)
-        else:
-            server.run(transport=args.transport)
+        server.run(transport=args.transport, mount_path=args.mount_path)
     except KeyboardInterrupt:
         print(
             "\nJenkins MCP Server shutting down due to KeyboardInterrupt...",

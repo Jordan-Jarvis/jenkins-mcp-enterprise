@@ -3,11 +3,23 @@
 import os
 from typing import Any, Dict, List, Optional
 
+from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    PointStruct,
+    Range,
+    VectorParams,
+)
+from sentence_transformers import SentenceTransformer
+
 from .base import Build, VectorChunk
 from .config import VectorConfig
 from .exceptions import VectorStoreError
 from .logging_config import get_component_logger
-from .streaming.log_processor import LogChunk
+from .streaming.log_processor import LogChunk, StreamingLogProcessor
 
 logger = get_component_logger("vector_manager")
 
@@ -20,33 +32,23 @@ class QdrantVectorManager:
         self.cache_manager = cache_manager
         self.jenkins_client = jenkins_client
 
-        # Check if vector search is disabled via environment variable (default: disabled)
+        # Check if vector search is disabled via environment variable
         self.vector_search_disabled = os.getenv(
-            "DISABLE_VECTOR_SEARCH", "true"
+            "DISABLE_VECTOR_SEARCH", ""
         ).lower() in ("true", "1", "yes")
 
         if self.vector_search_disabled:
-            logger.info(
-                "Vector search functionality is DISABLED (default). Set DISABLE_VECTOR_SEARCH=false to enable."
+            logger.warning(
+                "Vector search functionality is DISABLED via environment variable"
             )
             logger.info(
-                "Initialized in mock mode. Vector search dependencies are not required unless enabled."
+                "Initialized in mock mode. No Qdrant or SentenceTransformer will be loaded"
             )
             self.client = None
             self.model = None
             self.embedding_dim = 384  # Default dimension
             self.collection_name = config.collection_name
             return
-
-        # Vector search is enabled. Import optional dependencies lazily so the default install stays lightweight.
-        try:
-            from qdrant_client import QdrantClient
-            from sentence_transformers import SentenceTransformer
-        except ImportError as e:
-            raise VectorStoreError(
-                "Vector search is enabled but optional dependencies are missing. "
-                "Install with: `pip install jenkins_mcp_enterprise[vector]`"
-            ) from e
 
         # Initialize Qdrant client
         try:
@@ -74,7 +76,7 @@ class QdrantVectorManager:
         # Collection naming
         self.collection_name = config.collection_name
 
-        # Initialize collection with proper retry
+        # Initialize collection
         self._ensure_collection_exists()
 
     def _extract_host(self, host_url: str) -> str:
@@ -93,19 +95,18 @@ class QdrantVectorManager:
                 pass
         return 6333  # Default Qdrant port
 
+    def _to_vector_list(self, embedding: Any) -> List[float]:
+        """Normalize embedding output to a plain Python list."""
+        if hasattr(embedding, "tolist"):
+            return embedding.tolist()
+        return list(embedding)
+
     def _ensure_collection_exists(self) -> None:
         """Ensure the main collection exists with proper configuration"""
         if self.vector_search_disabled or not self.client:
             return
 
-        from qdrant_client.models import Distance, VectorParams
-
         try:
-            # Wait briefly for Qdrant to be fully ready (Docker timing issue)
-            import time
-
-            time.sleep(2)
-
             # Check if collection exists
             collections = self.client.get_collections()
             collection_names = [col.name for col in collections.collections]
@@ -127,39 +128,7 @@ class QdrantVectorManager:
             logger.info(f"Qdrant collection '{self.collection_name}' is ready")
 
         except Exception as e:
-            # Retry connection with exponential backoff
-            import time
-
-            max_retries = 5
-            for attempt in range(max_retries):
-                try:
-                    time.sleep(2**attempt)  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
-                    logger.info(
-                        f"Retrying Qdrant connection (attempt {attempt + 1}/{max_retries})"
-                    )
-                    collections = self.client.get_collections()
-                    collection_names = [col.name for col in collections.collections]
-
-                    if self.collection_name not in collection_names:
-                        self.client.create_collection(
-                            collection_name=self.collection_name,
-                            vectors_config=VectorParams(
-                                size=self.embedding_dim, distance=Distance.COSINE
-                            ),
-                        )
-                        self._create_indexes()
-
-                    logger.info(
-                        f"Qdrant collection '{self.collection_name}' initialized successfully"
-                    )
-                    return
-
-                except Exception as retry_e:
-                    logger.warning(f"Retry {attempt + 1} failed: {retry_e}")
-                    if attempt == max_retries - 1:
-                        raise VectorStoreError(
-                            f"Failed to initialize Qdrant after {max_retries} attempts: {e}"
-                        )
+            raise VectorStoreError(f"Failed to initialize Qdrant collection: {e}")
 
     def _create_indexes(self) -> None:
         """Create indexes for efficient metadata filtering"""
@@ -209,7 +178,7 @@ class QdrantVectorManager:
                     build=chunk.build,
                     chunk_index=int(chunk.chunk_id.split(":")[-1]),
                     text=chunk.content,
-                    vector=embedding.tolist(),
+                    vector=self._to_vector_list(embedding),
                 )
                 vector_chunks.append(vector_chunk)
 
@@ -225,8 +194,6 @@ class QdrantVectorManager:
         """Upsert chunks with hierarchical metadata to Qdrant"""
         if self.vector_search_disabled or not chunks or not self.client:
             return
-
-        from qdrant_client.models import PointStruct
 
         try:
             # Generate embeddings
@@ -295,11 +262,9 @@ class QdrantVectorManager:
         if self.vector_search_disabled or not self.client:
             return []
 
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
-
         try:
             # Generate query embedding
-            query_embedding = self.model.encode([query_text])[0].tolist()
+            query_embedding = self._to_vector_list(self.model.encode([query_text])[0])
 
             # Build filter conditions
             filter_conditions = []
@@ -322,13 +287,14 @@ class QdrantVectorManager:
             if min_diagnostic_score > 0:
                 filter_conditions.append(
                     FieldCondition(
-                        key="diagnostic_score", range={"gte": min_diagnostic_score}
+                        key="diagnostic_score",
+                        range=Range(gte=min_diagnostic_score),
                     )
                 )
 
             if max_depth is not None:
                 filter_conditions.append(
-                    FieldCondition(key="depth", range={"lte": max_depth})
+                    FieldCondition(key="depth", range=Range(lte=max_depth))
                 )
 
             # Create filter
@@ -337,30 +303,33 @@ class QdrantVectorManager:
             )
 
             # Perform search
-            results = self.client.search(
+            query_response = self.client.query_points(
                 collection_name=self.collection_name,
-                query_vector=query_embedding,
+                query=query_embedding,
                 query_filter=search_filter,
                 limit=top_k,
                 with_payload=True,
                 with_vectors=False,
             )
+            results = query_response.points
 
             # Format results
             formatted_results = []
             for result in results:
+                payload = result.payload or {}
                 formatted_result = {
                     "id": result.id,
                     "score": result.score,
-                    "build_id": result.payload["build_id"],
-                    "root_build_id": result.payload["root_build_id"],
-                    "log_level": result.payload["log_level"],
-                    "diagnostic_score": result.payload["diagnostic_score"],
-                    "pipeline_stage": result.payload["pipeline_stage"],
-                    "depth": result.payload["depth"],
-                    "start_line": result.payload["start_line"],
-                    "end_line": result.payload["end_line"],
-                    "content": result.payload["content"],
+                    "build_id": payload.get("build_id"),
+                    "root_build_id": payload.get("root_build_id"),
+                    "log_level": payload.get("log_level"),
+                    "diagnostic_score": payload.get("diagnostic_score"),
+                    "pipeline_stage": payload.get("pipeline_stage"),
+                    "depth": payload.get("depth"),
+                    "start_line": payload.get("start_line"),
+                    "end_line": payload.get("end_line"),
+                    "content": payload.get("content", ""),
+                    "payload": payload,
                 }
                 formatted_results.append(formatted_result)
 
@@ -377,8 +346,6 @@ class QdrantVectorManager:
         """Delete all vectors for a specific build"""
         if self.vector_search_disabled or not self.client:
             return
-
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         try:
             build_id = f"{build.job_name}:{build.build_number}"
@@ -399,12 +366,34 @@ class QdrantVectorManager:
             logger.error(f"Failed to delete build data: {e}")
             raise VectorStoreError(f"Build data deletion failed: {e}")
 
+    def index_build_log(self, build: Build, log_path) -> None:
+        """Index a cached build log for semantic search."""
+        if self.vector_search_disabled or not self.client:
+            return
+
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="replace") as log_stream:
+                processor = StreamingLogProcessor()
+                chunks = list(processor.process_streaming(log_stream, build))
+
+            if not chunks:
+                logger.info(
+                    f"No semantic chunks produced for {build.job_name}#{build.build_number}"
+                )
+                return
+
+            self.upsert_hierarchical_chunks(chunks, build, depth=0)
+
+        except Exception as e:
+            logger.error(
+                f"Failed to index build log for {build.job_name}#{build.build_number}: {e}"
+            )
+            raise VectorStoreError(f"Build log indexing failed: {e}") from e
+
     def delete_root_pipeline_data(self, root_build: Build) -> None:
         """Delete all vectors for an entire pipeline hierarchy"""
         if self.vector_search_disabled or not self.client:
             return
-
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         try:
             root_build_id = f"{root_build.job_name}:{root_build.build_number}"
@@ -472,8 +461,6 @@ class QdrantVectorManager:
         if self.vector_search_disabled:
             return
 
-        from qdrant_client.models import PointStruct
-
         # Use configured chunk size if not provided
         effective_chunk_size = chunk_size or self.config.chunk_size
 
@@ -503,7 +490,7 @@ class QdrantVectorManager:
 
         points = []
         for i, chunk_text in enumerate(chunks):
-            vector = self.model.encode(chunk_text).tolist()
+            vector = self._to_vector_list(self.model.encode(chunk_text))
 
             payload = {
                 "build_id": f"{build.job_name}:{build.build_number}",
@@ -527,15 +514,13 @@ class QdrantVectorManager:
         if self.vector_search_disabled or not self.client:
             return []
 
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-        query_embedding = self.model.encode([query_text])[0].tolist()
+        query_embedding = self._to_vector_list(self.model.encode([query_text])[0])
         build_id = f"{build.job_name}:{build.build_number}"
 
         # Search with build filter
-        results = self.client.search(
+        query_response = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=query_embedding,
+            query=query_embedding,
             query_filter=Filter(
                 must=[FieldCondition(key="build_id", match=MatchValue(value=build_id))]
             ),
@@ -543,6 +528,7 @@ class QdrantVectorManager:
             with_payload=True,
             with_vectors=True,
         )
+        results = query_response.points
 
         vector_chunks = []
         for result in results:

@@ -25,20 +25,12 @@ Without these plugins, sub-build discovery will be limited to log parsing only.
 """
 
 import concurrent.futures
-import gc
 import io
-import re
-import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import jenkins
 
-from ..base import Build, ParameterSpec
-from ..jenkins.build_tree import (
-    annotate_build_tree,
-    flatten_build_tree,
-    prune_build_tree_to_failure_paths,
-)
+from ..base import Build, ParameterSpec, SubBuild
 from ..cache_manager import CacheManager
 from ..diagnostic_config.diagnostic_config import get_diagnostic_config
 from ..jenkins.jenkins_client import JenkinsClient
@@ -125,8 +117,72 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
             ),
         ]
 
-    # NOTE: Sub-build tree building/flattening is now centralized in
-    # [`jenkins_mcp_enterprise.jenkins.build_tree`](jenkins_mcp_enterprise/jenkins/build_tree.py:1).
+    def _build_hierarchical_structure(
+        self, sub_builds: List[SubBuild], parent_node: Dict[str, Any]
+    ) -> None:
+        """Builds hierarchical folder-like structure by finding children and recursively building their subtrees."""
+
+        # Find direct children of the current parent
+        direct_children = sorted(
+            [
+                sb
+                for sb in sub_builds
+                if sb.parent_job_name == parent_node["job_name"]
+                and sb.parent_build_number == parent_node["build_number"]
+            ],
+            key=lambda sb: (sb.job_name, sb.build_number),
+        )
+
+        for child_sb in direct_children:
+            # Generate display text with proper indentation using configuration
+            display_config = self.config.config.display.get("hierarchy", {})
+            indent_spaces = display_config.get("indent_spaces_per_depth", 4)
+            connector = display_config.get("connector_symbol", "└── ")
+            prefix_adjustment = display_config.get("prefix_adjustment", 2)
+
+            status_config = self.config.config.display.get("status_display", {})
+            status_placeholder = status_config.get("unknown_placeholder", "UNKNOWN")
+            url_placeholder = status_config.get("url_placeholder", "No URL")
+
+            prefix_spaces = (
+                ((child_sb.depth - 1) * indent_spaces + prefix_adjustment)
+                if child_sb.depth > 0
+                else 0
+            )
+            prefix = " " * prefix_spaces
+
+            status_str = child_sb.status or status_placeholder
+            url_str = child_sb.url or url_placeholder
+            display_text = f"{prefix}{connector}Job: {child_sb.job_name}, Build: #{child_sb.build_number}, Status: {status_str}, URL: {url_str}"
+
+            # Create child node
+            failure_indicator = status_config.get("failure_indicator", "FAILURE")
+
+            child_node = {
+                "job_name": child_sb.job_name,
+                "build_number": child_sb.build_number,
+                "status": status_str,
+                "url": url_str,
+                "depth": child_sb.depth,
+                "display_text": display_text,
+                "is_failure": status_str == failure_indicator,
+                "parent_job_name": child_sb.parent_job_name,
+                "parent_build_number": child_sb.parent_build_number,
+                "children": [],
+            }
+
+            # Add child to parent's children list
+            parent_node["children"].append(child_node)
+
+            # Recursively build children for this child
+            self._build_hierarchical_structure(sub_builds, child_node)
+
+    def _flatten_build_tree(self, build_node: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Flattens the hierarchical build tree for analysis purposes."""
+        result = [build_node]
+        for child in build_node.get("children", []):
+            result.extend(self._flatten_build_tree(child))
+        return result
 
     def _get_sub_build_information(
         self, current_build: Build, jenkins_client=None
@@ -140,69 +196,56 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
         main_build_status_str = current_build.status or "UNKNOWN"
         main_build_url_str = current_build.url or "No URL"
 
-        # Pre-populate the root node so callers always get a consistent shape,
-        # even if discovery fails.
-        sub_build_info_result["build_tree"] = {
+        # Create the main build as the root of the hierarchy
+        main_build_entry = {
             "job_name": current_build.job_name,
             "build_number": current_build.build_number,
             "status": main_build_status_str,
-            "url": current_build.url,
+            "url": main_build_url_str,
             "depth": 0,
+            "display_text": f"Job: {current_build.job_name}, Build: #{current_build.build_number}, Status: {main_build_status_str}, URL: {main_build_url_str}",
+            "is_failure": main_build_status_str == "FAILURE",
             "children": [],
         }
+        sub_build_info_result["build_tree"] = main_build_entry
 
+        sub_builds_list: List[SubBuild] = []
         try:
-            # Canonical: use the Jenkins discovery layer to build a true subtree
-            # structure, rather than re-building a tree from a flat list.
+            # Use current_build object as per JenkinsClient.list_sub_builds signature
+            # Use the provided jenkins_client or fallback to default
             client_to_use = jenkins_client if jenkins_client else self.jenkins_client
-            build_tree = client_to_use.get_build_hierarchy(
-                current_build.job_name, current_build.build_number, max_depth=15
-            )
-
-            # Ensure root node carries the real root build status/url.
-            # (SubBuildDiscoverer.get_build_hierarchy historically omitted these for the root.)
-            if isinstance(build_tree, dict):
-                build_tree["status"] = main_build_status_str
-                build_tree["url"] = current_build.url
-
-            # Add common annotations (depth/parent/failed)
-            status_config = self.config.config.display.get("status_display", {}) or {}
-
-            annotate_build_tree(
-                build_tree,
-                # Treat common non-success end states as failures so pruning/guidance works.
-                failure_statuses={"FAILURE", "UNSTABLE", "ABORTED"},
-                status_unknown_placeholder=status_config.get(
-                    "unknown_placeholder", "UNKNOWN"
-                ),
-            )
-
-            sub_build_info_result["build_tree"] = build_tree
-
+            sub_builds_list = client_to_use.list_sub_builds(current_build)
         except jenkins.JenkinsException as e:
-            error_msg = f"Error fetching sub-build hierarchy for {current_build.job_name} #{current_build.build_number}: {str(e)}"
-            sub_build_info_result["errors"].append(error_msg)
+            error_msg = f"Error fetching sub-builds for {current_build.job_name} #{current_build.build_number}: {str(e)}"
+            sub_build_info_result["errors"].append(error_msg)  # Store error
             sub_build_info_result["guidance"] = (
                 f"Could not retrieve sub-build information due to an error: {str(e)}"
             )
+            # The tree will only contain the main build string at this point.
             return sub_build_info_result
-        except Exception as e:
-            error_msg = f"An unexpected error occurred while fetching sub-build hierarchy for {current_build.job_name} #{current_build.build_number}: {str(e)}"
+        except Exception as e:  # Catch other potential errors
+            error_msg = f"An unexpected error occurred while fetching sub-builds for {current_build.job_name} #{current_build.build_number}: {str(e)}"
             sub_build_info_result["errors"].append(error_msg)
             sub_build_info_result["guidance"] = (
                 "Could not retrieve sub-build information due to an unexpected error."
             )
             return sub_build_info_result
 
-        # Generate guidance based on hierarchical structure
-        all_builds = flatten_build_tree(sub_build_info_result["build_tree"])
-        failed_builds = [b for b in all_builds if b.get("failed")]
-
-        if len(all_builds) <= 1:
+        if not sub_builds_list:
             sub_build_info_result["guidance"] = (
                 f"No sub-builds were found for {current_build.job_name} #{current_build.build_number}."
             )
+            # Tree already contains main build string
             return sub_build_info_result
+
+        # Build hierarchical structure
+        self._build_hierarchical_structure(
+            sub_builds_list, sub_build_info_result["build_tree"]
+        )
+
+        # Generate guidance based on hierarchical structure
+        all_builds = self._flatten_build_tree(sub_build_info_result["build_tree"])
+        failed_builds = [b for b in all_builds if b["is_failure"]]
 
         if not failed_builds:
             sub_build_info_result["guidance"] = (
@@ -240,63 +283,27 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
 
     def _execute_impl(self, **kwargs) -> Dict[str, Any]:
         """Execute build failure diagnosis with improved structure"""
-        start_time = time.time()
-
         # Step 1: Parse and normalize inputs
-        step_start = time.time()
         params = self._parse_and_normalize_inputs(kwargs)
-        logger.info(
-            f"TIMING: Step 1 (parse inputs) took {time.time() - step_start:.2f}s"
-        )
         if "error" in params:
             return params
 
         # Step 2: Initialize result structure
-        step_start = time.time()
         result = self._initialize_result_structure(params)
-        logger.info(
-            f"TIMING: Step 2 (initialize result) took {time.time() - step_start:.2f}s"
-        )
 
         # Step 3: Get build information
-        step_start = time.time()
         build_info = self._get_build_information(params, result)
-        logger.info(
-            f"TIMING: Step 3 (get build info) took {time.time() - step_start:.2f}s"
-        )
         if build_info is None:
             return result
 
         # Step 4: Check if we should skip successful builds
-        step_start = time.time()
         if self._should_skip_build(
             build_info, params["skip_successful_builds"], result
         ):
-            logger.info(
-                f"TIMING: Step 4 (check skip) took {time.time() - step_start:.2f}s"
-            )
             return result
-        logger.info(f"TIMING: Step 4 (check skip) took {time.time() - step_start:.2f}s")
 
         # Step 5: Process build hierarchy and logs
-        step_start = time.time()
-        (
-            sub_builds,
-            error_analysis,
-            recommendations,
-            build_summary,
-        ) = self._process_build_analysis(params, build_info, result)
-        logger.info(
-            f"TIMING: Step 5 (build analysis) took {time.time() - step_start:.2f}s"
-        )
-
-        result["sub_builds"] = sub_builds
-        result["error_analysis"] = error_analysis
-        result["recommendations"] = recommendations
-        result["build_summary"] = build_summary
-
-        total_time = time.time() - start_time
-        logger.info(f"TIMING: Total diagnosis execution took {total_time:.2f}s")
+        self._process_build_analysis(params, build_info, result)
 
         return result
 
@@ -361,13 +368,20 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
             "build_number": params["build_number"],
             "overall_status_from_jenkins": "UNKNOWN",
             "log_analysis_status": "PENDING",
-            "recommendations": [],
-            "build_summary": "",
+            "log_cached_path": "",
+            "vector_indexing_status": "NOT_ATTEMPTED",
+            "heuristic_findings": [],
+            "semantic_search_highlights": [],
             "errors": [],
-            "sub_build_information": {
-                "guidance": "",
-                "errors": [],
-                "build_tree": {},
+            "sub_build_information": {"build_tree": {}, "guidance": "", "errors": []},
+            "build_summary": "",
+            "error_analysis": [],
+            "recommendations": [],
+            "context_stats": {
+                "total_tokens": 0,
+                "truncated": False,
+                "chunks_analyzed": 0,
+                "high_value_chunks": 0,
             },
         }
 
@@ -419,191 +433,28 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
                 "Diagnosis skipped as requested (skip_successful_builds=True)."
             )
             result["recommendations"] = [
-                "✅ Build completed successfully - no issues detected",
-                "💡 To analyze successful builds, set skip_successful_builds=False",
+                "Build completed successfully; no issues were detected",
+                "To analyze successful builds, set skip_successful_builds=False",
             ]
             return True
         return False
 
-    def _get_error_analysis(
-        self, log_chunks: List, root_build: Build
-    ) -> Dict[str, Any]:
-        """Analyze processed log chunks to extract errors and semantic highlights.
-
-        Critical: this method must NEVER return huge blobs of log content.
-
-        Prior behavior returned `chunk.content` for each chunk containing "ERROR".
-        In fast processing mode, chunk.content can be ~1MB, and multiple entries
-        can balloon responses into multi-million-token payloads.
-        """
-
-        def _truncate(text: str, max_chars: int) -> str:
-            if not text:
-                return ""
-            if len(text) <= max_chars:
-                return text
-            return text[:max_chars] + "..."
-
-        # Limits (configurable via YAML `error_analysis.*` when present; safe defaults otherwise)
-        error_cfg = getattr(self.config.config, "error_analysis", {}) or {}
-        ctx_cfg = getattr(self.config.config, "context", None)
-        display_trunc = (getattr(self.config.config, "display", {}) or {}).get(
-            "truncation", {}
-        )
-
-        max_error_entries = int(error_cfg.get("max_error_entries", 10))
-        max_error_line_chars = int(error_cfg.get("max_error_line_chars", 500))
-        # Use token-based config if available; fall back to a sane ceiling
-        max_context_chars = int(
-            error_cfg.get(
-                "max_error_context_chars",
-                (
-                    (getattr(ctx_cfg, "max_tokens_per_chunk", 500) * 4)
-                    if ctx_cfg
-                    else 2000
-                ),
-            )
-        )
-        context_window = int(error_cfg.get("context_window_lines", 5))
-        # Display-level truncation is used as a minimum floor (avoid returning >400 char previews if configured)
-        max_context_chars = max(
-            int(display_trunc.get("max_display_length", 400)), max_context_chars
-        )
-
-        # Focused match patterns (avoid collecting huge "ERROR" blocks)
-        # Use word boundaries / common markers to avoid false positives like "logErrors".
-        error_line_pattern = re.compile(
-            r"(\[ERROR\]|\bERROR\b|\bException\b|\bFAILED\b|\bFATAL\b|\bBUILD FAILED\b|AbortException)",
-            re.IGNORECASE,
-        )
-
-        # Prefer high-diagnostic chunks first. Do NOT require `chunk.log_level == "ERROR"`
-        # because some processors/test logs emit error markers like "[ERROR]" while
-        # classifying the chunk as INFO.
-        def _chunk_has_error_line(c) -> bool:
-            content = getattr(c, "content", "") or ""
-            return bool(content and error_line_pattern.search(content))
-
-        candidate_chunks = [c for c in log_chunks if _chunk_has_error_line(c)]
-
-        # Sort with a small bias for chunks explicitly tagged as ERROR, then by diagnostic_score.
-        sorted_chunks = sorted(
-            candidate_chunks,
-            key=lambda c: (
-                1 if getattr(c, "log_level", "") == "ERROR" else 0,
-                float(getattr(c, "diagnostic_score", 0.0) or 0.0),
-            ),
-            reverse=True,
-        )
-
-        errors: List[Dict[str, Any]] = []
-
-        for chunk in sorted_chunks:
-            if len(errors) >= max_error_entries:
-                break
-
-            content = getattr(chunk, "content", "") or ""
-            if not content:
-                continue
-
-            # Find a matching line in this chunk and capture a small context window.
-            # Prefer a line that contains the literal token "ERROR" (many tests/logs
-            # include "[ERROR] ..."), then fall back to other failure indicators.
-            lines = content.splitlines()
-            match_index: Optional[int] = None
-            match_line: str = ""
-
-            error_priority_pattern = re.compile(r"(\[ERROR\]|\bERROR\b)", re.IGNORECASE)
-
-            # Pass 1: prefer explicit ERROR lines
-            for i, line in enumerate(lines):
-                if error_priority_pattern.search(line):
-                    match_index = i
-                    match_line = line
-                    break
-
-            # Pass 2: broader failure patterns
-            if match_index is None:
-                for i, line in enumerate(lines):
-                    if error_line_pattern.search(line):
-                        match_index = i
-                        match_line = line
-                        break
-
-            if match_index is None:
-                continue
-
-            start_i = max(0, match_index - context_window)
-            end_i = min(len(lines), match_index + context_window + 1)
-            context_snippet = "\n".join(lines[start_i:end_i])
-
-            # Best-effort line number (fast mode uses start_line=0)
-            start_line = int(getattr(chunk, "start_line", 0) or 0)
-            line_number = start_line + match_index if start_line > 0 else None
-
-            errors.append(
-                {
-                    "job_name": chunk.build.job_name,
-                    "build_number": chunk.build.build_number,
-                    "chunk_id": getattr(chunk, "chunk_id", ""),
-                    "line_number": line_number,
-                    "match_text": _truncate(match_line, max_error_line_chars),
-                    "context": _truncate(context_snippet, max_context_chars),
-                }
-            )
-
-        return {
-            "errors": errors,
-            "semantic_highlights": self._generate_semantic_highlights(
-                log_chunks, root_build
-            ),
-        }
-
     def _process_build_analysis(
         self, params: Dict[str, Any], build: Build, result: Dict[str, Any]
-    ) -> Tuple[List[Dict], Dict, List, str]:
-        """Process the main build analysis including hierarchy and logs."""
+    ):
+        """Process the main build analysis including hierarchy and logs"""
         # Get jenkins client for sub-build discovery
-        step_start = time.time()
         jenkins_client = self.get_jenkins_client(params["instance_id"])
-        logger.info(f"TIMING: Get Jenkins client took {time.time() - step_start:.2f}s")
 
         # Get sub-build information
-        step_start = time.time()
         sub_build_info = self._get_sub_build_information(build, jenkins_client)
-        logger.info(f"TIMING: Sub-build discovery took {time.time() - step_start:.2f}s")
-
-        # Presentation rule:
-        # - If skip_successful_builds is True (default), only show the paths that lead to failing builds.
-        # - If skip_successful_builds is False, show the full tree.
-        presentation_tree = sub_build_info.get("build_tree") or {}
-        if params.get("skip_successful_builds", True):
-            # Ensure `is_failure` exists (added by annotate_build_tree in _get_sub_build_information).
-            presentation_tree = prune_build_tree_to_failure_paths(presentation_tree)
-
-        # Remove parent pointers from the output to save tokens.
-        # The hierarchical containment already implies parentage.
-        def _strip_parent_fields(n: Dict[str, Any]) -> None:
-            if not isinstance(n, dict):
-                return
-            n.pop("parent_job_name", None)
-            n.pop("parent_build_number", None)
-            for c in n.get("children", []) or []:
-                if isinstance(c, dict):
-                    _strip_parent_fields(c)
-
-        if isinstance(presentation_tree, dict):
-            _strip_parent_fields(presentation_tree)
-
-        # Store the pruned/full tree for output.
-        sub_build_info["build_tree"] = presentation_tree
         result["sub_build_information"] = sub_build_info
 
-        # Build hierarchy for analysis - extract all builds from the (possibly pruned) tree
-        hierarchy_dicts = flatten_build_tree(sub_build_info["build_tree"])
+        # Build hierarchy for analysis - extract all builds from the tree
+        hierarchy_dicts = self._flatten_build_tree(sub_build_info["build_tree"])
 
         # Convert hierarchy dictionaries to Build objects for processing
-        hierarchy_builds: List[Build] = []
+        hierarchy_builds = []
         for build_dict in hierarchy_dicts:
             hierarchy_builds.append(
                 Build(
@@ -616,17 +467,7 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
 
         # Process logs
         try:
-            step_start = time.time()
             log_processor = StreamingLogProcessor()
-            # Set fast mode when vector search is disabled
-            log_processor._vector_search_disabled = getattr(
-                self.vector_manager, "vector_search_disabled", True
-            )
-            logger.info(
-                f"TIMING: Create log processor took {time.time() - step_start:.2f}s"
-            )
-
-            step_start = time.time()
             log_chunks = self._process_logs_parallel_sync(
                 hierarchy_builds,
                 log_processor,
@@ -634,76 +475,30 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
                 params["skip_successful_builds"],
                 result,
             )
-            logger.info(
-                f"TIMING: Parallel log processing took {time.time() - step_start:.2f}s"
+            result["context_stats"]["chunks_analyzed"] = len(log_chunks)
+
+            # Generate analysis components
+            result["build_summary"] = self._generate_build_summary(
+                build, hierarchy_builds
             )
-
-            # Generate build summary
-            step_start = time.time()
-            build_summary = self._generate_build_summary(build, hierarchy_builds)
-            logger.info(
-                f"TIMING: Generate build summary took {time.time() - step_start:.2f}s"
+            result["semantic_search_highlights"] = self._generate_semantic_highlights(
+                log_chunks, self.vector_manager, build
             )
-
-            # Generate recommendations
-            step_start = time.time()
-            recommendations = self._generate_recommendations(
-                build, hierarchy_dicts, log_chunks
+            result["error_analysis"] = self._extract_key_failure_patterns(log_chunks)
+            result["recommendations"] = self._generate_recommendations(
+                hierarchy_builds, log_chunks
             )
-            logger.info(
-                f"TIMING: Generate recommendations took {time.time() - step_start:.2f}s"
-            )
-
-            # Get error analysis
-            # When we are *not* including successful branches (default), focus error extraction
-            # on the deepest failing build(s) so we don't match noisy "error-like" lines from
-            # the parent pipeline.
-            failure_statuses = {"FAILURE", "UNSTABLE", "ABORTED"}
-            focused_chunks = log_chunks
-
-            # Always attempt to focus error extraction on the deepest failing build(s)
-            # when any failures exist, regardless of whether the caller asked to include
-            # successful builds.
-            failing_nodes = [
-                b
-                for b in hierarchy_dicts
-                if b.get("failed") or b.get("status") in failure_statuses
-            ]
-            if failing_nodes:
-                max_depth = max(int(b.get("depth") or 0) for b in failing_nodes)
-                focus_keys = {
-                    (b.get("job_name"), int(b.get("build_number") or 0))
-                    for b in failing_nodes
-                    if int(b.get("depth") or 0) == max_depth
-                }
-                candidate = [
-                    c
-                    for c in log_chunks
-                    if (
-                        getattr(getattr(c, "build", None), "job_name", None),
-                        int(getattr(getattr(c, "build", None), "build_number", 0) or 0),
-                    )
-                    in focus_keys
-                ]
-                if candidate:
-                    focused_chunks = candidate
-
-            error_analysis = self._get_error_analysis(focused_chunks, build)
 
             result["log_analysis_status"] = "COMPLETED"
 
-            return hierarchy_dicts, error_analysis, recommendations, build_summary
-
         except Exception as e:
-            result["log_analysis_status"] = "FAILED"
+            result["log_analysis_status"] = "ERROR"
             result["errors"].append(f"Log processing failed: {str(e)}")
-            logger.error(f"Log processing failed: {e}", exc_info=True)
-            return [], {}, [], ""
+            logger.error(f"Log processing error: {e}")
 
     def _generate_build_summary(self, root_build: Build, hierarchy: List[Build]) -> str:
         """Generate concise build summary"""
-        failure_statuses = {"FAILURE", "UNSTABLE", "ABORTED"}
-        failed_builds = [b for b in hierarchy if b.status in failure_statuses]
+        failed_builds = [b for b in hierarchy if b.status == "FAILURE"]
 
         # Get configuration values
         max_failures = self.config.config.summary.max_failures_displayed
@@ -740,18 +535,19 @@ Primary Failure Points:
     # _generate_hierarchy_data removed - functionality integrated into sub_build_information.builds
 
     def _generate_semantic_highlights(
-        self, chunks: List, root_build: Build
+        self, chunks: List, vector_manager, root_build: Build
     ) -> List[str]:
-        """Generate semantic search highlights (or fall back to pattern extraction)."""
-        highlights: List[str] = []
+        """Generate semantic search highlights for stack traces, failing tests, etc."""
+        highlights = []
 
-        vector_manager = self.vector_manager
         if not vector_manager or getattr(
             vector_manager, "vector_search_disabled", True
         ):
+            # Fallback: extract key patterns from high-scoring chunks
             return self._extract_key_failure_patterns(chunks)
 
         try:
+            # Get search queries from configuration
             search_queries = self.config.get_semantic_search_queries()
 
             for query in search_queries:
@@ -782,7 +578,8 @@ Primary Failure Points:
                                 self.config.config.semantic_search.max_content_preview
                             )
                             highlight = (
-                                f"🔍 {job_name} #{build_num} (relevance: {score:.2f})\n"
+                                f"{job_name} #{build_num} "
+                                f"(relevance: {score:.2f})\n"
                                 f"{content[:preview_length]}..."
                             )
                             highlights.append(highlight)
@@ -803,255 +600,95 @@ Primary Failure Points:
 
         # Get configuration values
         max_chunks = self.config.config.build_processing.chunks.get(
-            "max_chunks_for_analysis", 20  # Increased for comprehensive analysis
+            "max_chunks_for_analysis", 10
         )
         failure_patterns = self.config.get_failure_patterns()
         max_patterns = self.config.config.failure_patterns.max_fallback_patterns
         max_preview = self.config.config.failure_patterns.max_pattern_preview
 
-        # Score and rank chunks based on failure patterns only
-        scored_chunks = []
-        for chunk in chunks[: max_chunks * 2]:  # Analyze more chunks for better results
+        for chunk in chunks[:max_chunks]:
             content = chunk.content.lower()
-            score = 0
-            matched_patterns = []
 
-            # Score based on failure patterns
-            for pattern in failure_patterns:
-                if pattern.lower() in content:
-                    score += 2
-                    matched_patterns.append(pattern)
+            # Look for configured failure patterns
+            if any(pattern in content for pattern in failure_patterns):
+                pattern = (
+                    f"{chunk.build.job_name} #{chunk.build.build_number}\n"
+                    f"{chunk.content[:max_preview]}..."
+                )
+                patterns.append(pattern)
 
-            # Boost score for stack traces, exceptions, and error codes
-            if any(
-                indicator in content
-                for indicator in [
-                    "exception",
-                    "error",
-                    "failed",
-                    "stack trace",
-                    "at java.",
-                    "caused by",
-                ]
-            ):
-                score += 3
-
-            # Boost score for build-specific failures
-            if any(
-                build_term in content
-                for build_term in [
-                    "build failed",
-                    "compilation error",
-                    "test failed",
-                    "timeout",
-                ]
-            ):
-                score += 2
-
-            if score > 0:
-                scored_chunks.append((score, chunk, matched_patterns))
-
-        # Sort by score (highest first) and take the best ones
-        scored_chunks.sort(key=lambda x: x[0], reverse=True)
-
-        for score, chunk, matched_patterns in scored_chunks[:max_patterns]:
-            # Create pattern description with relevance info
-            relevance_info = f"relevance: {score:.1f}"
-            pattern_info = (
-                f"patterns: {', '.join(set(matched_patterns[:3]))}"
-                if matched_patterns
-                else ""
-            )
-
-            pattern = f"🔍 {chunk.build.job_name} #{chunk.build.build_number} ({relevance_info})\n{chunk.content[:max_preview]}..."
-            if pattern_info:
-                pattern += f"\n📋 {pattern_info}"
-
-            patterns.append(pattern)
-
-        return patterns
+        return patterns[:max_patterns]
 
     def _generate_recommendations(
-        self, root_build: Build, hierarchy_dicts: List[Dict[str, Any]], chunks: List
+        self, failure_hierarchy: List[Build], chunks: List
     ) -> List[str]:
-        """Generate actionable recommendations based on failure patterns.
-
-        Important:
-        - `hierarchy_dicts` contains `depth`/`is_failure` metadata.
-        - `chunks` are `LogChunk` objects.
-        """
-        failure_statuses = {"FAILURE", "UNSTABLE", "ABORTED"}
-        failed_builds = [
-            b
-            for b in hierarchy_dicts
-            if b.get("failed") or b.get("status") in failure_statuses
-        ]
+        """Generate actionable recommendations based on failure patterns"""
+        failed_builds = [b for b in failure_hierarchy if b.status == "FAILURE"]
 
         if not failed_builds:
-            return ["✅ No build failures detected in this pipeline"]
+            return ["No build failures detected in this pipeline"]
 
-        # Primary content source for pattern matching: cached full console log for the root build.
-        content_for_matching: str = ""
-        try:
-            cache_path = self.cache_manager.get_path(root_build)
-            with open(cache_path, "r", encoding="utf-8", errors="ignore") as f:
-                content_for_matching = (f.read() or "").lower()
-        except FileNotFoundError:
-            content_for_matching = ""
-        except Exception as e:
-            return [f"Error reading log file: {e}"]
+        # Analyze failure patterns across chunks
+        max_content_chunks = self.config.config.build_processing.chunks.get(
+            "max_chunks_for_content", 20
+        )
+        all_content = " ".join([c.content.lower() for c in chunks[:max_content_chunks]])
 
-        # Fallback: limited content from processed chunks
-        if not content_for_matching:
-            max_content_chunks = self.config.config.build_processing.chunks.get(
-                "max_chunks_for_content", 20
-            )
-            content_for_matching = " ".join(
-                [(c.content or "").lower() for c in chunks[:max_content_chunks]]
-            )
+        # Generate pattern-based recommendations
+        recommendations = self._get_pattern_recommendations(all_content)
 
-        recommendations: List[str] = []
-
-        # Pattern-based recommendations using the configured diagnostic rules
-        recommendations.extend(self._get_pattern_recommendations(content_for_matching))
-
-        # Priority guidance based on deepest failure (uses depth from hierarchy dicts)
+        # Add priority guidance
         priority_rec = self._get_priority_recommendation(failed_builds)
         if priority_rec:
-            recommendations.insert(0, priority_rec)
+            recommendations.append(priority_rec)
 
-        # Generic guidance if no specific recommendations found
-        if not recommendations:
-            recommendations.append(
-                "No specific failure patterns found. Review the build logs manually for more details."
-            )
-
-        # Standard investigation guidance
+        # Add investigation guidance
         recommendations.append(self._get_investigation_guidance())
 
         return recommendations[: self.config.config.recommendations.max_recommendations]
 
     def _get_pattern_recommendations(self, content: str) -> List[str]:
-        """Extract recommendations with regex capture group interpolation"""
+        """Extract recommendations based on error patterns in content"""
         recommendations = []
+
+        # Get pattern recommendations from configuration
         pattern_configs = self.config.get_pattern_recommendations()
 
-        for pattern_name, pattern_config in pattern_configs.items():
-            matches, captured_groups = self._matches_pattern_conditions(
-                content, pattern_config.conditions
-            )
-
-            if matches:
-                # Use interpolated message from condition if available
-                if "_interpolated_message" in captured_groups:
-                    # Skip empty interpolated messages
-                    if captured_groups["_interpolated_message"].strip():
-                        recommendations.append(captured_groups["_interpolated_message"])
-                elif captured_groups and "{" in pattern_config.message:
-                    # Interpolate the main message with captured groups
-                    interpolated_message = pattern_config.message.format(
-                        **captured_groups
-                    )
-                    if interpolated_message.strip():
-                        recommendations.append(interpolated_message)
-                else:
-                    # No interpolation needed or possible
-                    if pattern_config.message.strip():
-                        recommendations.append(pattern_config.message)
+        for _, pattern_config in pattern_configs.items():
+            if self._matches_pattern_conditions(content, pattern_config.conditions):
+                recommendations.append(pattern_config.message)
 
         return recommendations
 
-    def _matches_pattern_conditions(
-        self, content: str, conditions: List
-    ) -> Tuple[bool, Dict[str, str]]:
-        """
-        Enhanced pattern matching with regex capture group support
-
-        Args:
-            content: The content to match against
-            conditions: List of conditions (strings, lists, or regex dicts)
-
-        Returns:
-            Tuple of (matches: bool, captured_groups: Dict[str, str])
-        """
-        all_captured_groups = {}
-
+    def _matches_pattern_conditions(self, content: str, conditions: List) -> bool:
+        """Check if content matches pattern conditions"""
         for condition in conditions:
             if isinstance(condition, str):
-                # Backward compatible: simple string condition
-                if condition.lower() in content.lower():
-                    return True, {}
-
+                # Single string condition
+                if condition.lower() in content:
+                    return True
             elif isinstance(condition, list):
-                # Backward compatible: OR condition
-                if any(cond.lower() in content.lower() for cond in condition):
-                    return True, {}
+                # OR condition - any item in the list matches
+                if any(cond.lower() in content for cond in condition):
+                    return True
+        return False
 
-            elif isinstance(condition, dict) and condition.get("type") == "regex":
-                # New: regex with capture groups
-                pattern = condition["pattern"]
-                flags = condition.get("flags", re.IGNORECASE)
+    def _get_priority_recommendation(self, failed_builds: List[Build]) -> Optional[str]:
+        """Generate priority recommendation based on failed builds"""
+        priority_config = self.config.config.recommendations.priority_jobs
+        pattern = priority_config.get("app_pattern", "app")
+        max_builds = priority_config.get("max_priority_builds", 3)
+        message_template = priority_config.get("priority_message_template", "")
 
-                try:
-                    compiled_pattern = re.compile(pattern, flags)
-                    match = compiled_pattern.search(content)
+        deepest_failures = [b for b in failed_builds if pattern in b.job_name]
 
-                    if match:
-                        # Capture named groups
-                        captured_groups = match.groupdict()
-
-                        # Capture numbered groups if no named groups
-                        if not captured_groups and match.groups():
-                            captured_groups = {
-                                f"group_{i}": group or ""
-                                for i, group in enumerate(match.groups(), 1)
-                            }
-
-                        all_captured_groups.update(captured_groups)
-
-                        # If this condition has a message template, store it for later use
-                        if condition.get("message_template"):
-                            try:
-                                interpolated = condition["message_template"].format(
-                                    **captured_groups
-                                )
-                                all_captured_groups["_interpolated_message"] = (
-                                    interpolated
-                                )
-                            except KeyError as e:
-                                logger.warning(
-                                    f"Failed to interpolate message template: missing key {e}"
-                                )
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to interpolate message template: {e}"
-                                )
-
-                        return True, all_captured_groups
-
-                except re.error as e:
-                    logger.error(f"Invalid regex pattern '{pattern}': {e}")
-                    continue
-
-        return False, {}
-
-    def _get_priority_recommendation(self, failed_builds: List[Dict]) -> Optional[str]:
-        """Get priority recommendation based on deepest failure"""
-        if not failed_builds:
-            return None
-
-        # Find the deepest failure(s)
-        max_depth = max(b["depth"] for b in failed_builds)
-        deepest_failures = [b for b in failed_builds if b["depth"] == max_depth]
-
-        if len(deepest_failures) == 1:
-            failure = deepest_failures[0]
-            return f"🎯 **Priority**: Start with the deepest failure: '{failure['job_name']} #{failure['build_number']}'."
-        else:
-            failure_names = [
-                f"'{b['job_name']} #{b['build_number']}'" for b in deepest_failures
-            ]
-            return f"🎯 **Priority**: Investigate the deepest failures: {', '.join(failure_names)}."
+        if deepest_failures:
+            app_builds = ", ".join(
+                [f"#{b.build_number}" for b in deepest_failures[:max_builds]]
+            )
+            return message_template.format(
+                job_pattern=pattern, build_numbers=app_builds
+            )
 
         return None
 
@@ -1119,12 +756,6 @@ Primary Failure Points:
         logger.info(
             f"Parallel processing completed: {len(all_chunks)} total chunks from {len(builds_to_process)} builds"
         )
-
-        # Force garbage collection after processing large builds to prevent memory accumulation
-        if len(builds_to_process) > 3 or len(all_chunks) > 1000:
-            logger.info("Running garbage collection after large build processing")
-            gc.collect()
-
         return all_chunks
 
     def _process_single_build_logs(
@@ -1134,26 +765,21 @@ Primary Failure Points:
         jenkins_client: JenkinsClient,
     ) -> Tuple[List, Optional[str]]:
         """Process logs for a single build (thread-safe)"""
-        build_start = time.time()
         chunks = []
         log_path = None
 
         try:
             # Check if logs are already cached first
             try:
-                cache_start = time.time()
                 log_path = self.cache_manager.fetch(jenkins_client, build)
-                logger.info(
-                    f"TIMING: Cache fetch for {build.job_name}#{build.build_number} took {time.time() - cache_start:.2f}s"
-                )
 
                 # Check if cached file exists and is not empty
                 if log_path.exists() and log_path.stat().st_size > 0:
                     logger.info(
                         f"Using cached logs for {build.job_name}#{build.build_number}"
                     )
-                    # Process directly from file without loading into memory
-                    file_handle = open(log_path, "r", errors="ignore")
+                    with open(log_path, "r", errors="ignore") as f:
+                        log_stream = io.StringIO(f.read())
                 else:
                     # Cache miss - need to fetch from Jenkins
                     logger.info(
@@ -1161,12 +787,8 @@ Primary Failure Points:
                     )
                     # Re-fetch through cache manager
                     log_path = self.cache_manager.fetch(jenkins_client, build)
-                    file_handle = open(log_path, "r", errors="ignore")
-
-                logger.info(
-                    f"Starting chunk processing for {build.job_name}#{build.build_number}"
-                )
-                processing_start = time.time()
+                    with open(log_path, "r", errors="ignore") as f:
+                        log_stream = io.StringIO(f.read())
 
             except Exception as cache_e:
                 logger.warning(
@@ -1176,37 +798,10 @@ Primary Failure Points:
                 return chunks, str(log_path) if log_path else None
 
             # Stream process logs into semantic chunks
-            try:
-                # Process chunks as generator to avoid loading all into memory
-                # Apply chunk limits to prevent memory accumulation
-                max_chunks = self.config.config.build_processing.chunks.get(
-                    "max_chunks_for_content", 1000
-                )
-                chunk_count = 0
-
-                for chunk in processor.process_streaming(file_handle, build):
-                    if chunk_count >= max_chunks:
-                        logger.info(
-                            f"Reached max chunk limit ({max_chunks}) for {build.job_name}#{build.build_number}"
-                        )
-                        break
-                    chunks.append(chunk)
-                    chunk_count += 1
-
-                    # Log progress every 100 chunks to detect hangs
-                    if chunk_count % 100 == 0:
-                        elapsed = time.time() - processing_start
-                        logger.info(
-                            f"Progress: {chunk_count} chunks processed in {elapsed:.1f}s for {build.job_name}#{build.build_number}"
-                        )
-
-                logger.info(
-                    f"Processed {chunk_count} chunks from {build.job_name}#{build.build_number} in {time.time() - processing_start:.1f}s"
-                )
-            finally:
-                # Ensure file handle is always closed
-                if "file_handle" in locals():
-                    file_handle.close()
+            chunks = list(processor.process_streaming(log_stream, build))
+            logger.info(
+                f"Processed {len(chunks)} chunks from {build.job_name}#{build.build_number}"
+            )
 
         except Exception as e:
             logger.warning(

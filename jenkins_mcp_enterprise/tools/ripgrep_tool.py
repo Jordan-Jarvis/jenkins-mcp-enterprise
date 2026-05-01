@@ -38,7 +38,7 @@ class RipgrepSearchTool(LogOperationTool):
 
     @property
     def description(self) -> str:
-        return "🔎 RIPGREP: Fast pattern search in Jenkins logs with before/after context lines. Supports regex, case-insensitive search, and line number ranges. IMPORTANT: jenkins_url is required because jobs are load-balanced across multiple Jenkins servers."
+        return "Fast pattern search in Jenkins logs with before/after context lines. Supports regex, case-insensitive search, and line number ranges. IMPORTANT: jenkins_url is required because jobs are load-balanced across multiple Jenkins servers."
 
     @property
     def parameters(self) -> List[ParameterSpec]:
@@ -359,7 +359,7 @@ class NavigateLogTool(LogOperationTool):
 
     @property
     def description(self) -> str:
-        return "📍 NAVIGATE: Jump to specific sections in logs using patterns (e.g., 'Building module X', 'Stage: Deploy'). Shows surrounding context. IMPORTANT: jenkins_url is required because jobs are load-balanced across multiple Jenkins servers."
+        return "Jump to specific sections in logs using patterns (for example, 'Building module X' or 'Stage: Deploy'). Shows surrounding context. IMPORTANT: jenkins_url is required because jobs are load-balanced across multiple Jenkins servers."
 
     @property
     def parameters(self) -> List[ParameterSpec]:
