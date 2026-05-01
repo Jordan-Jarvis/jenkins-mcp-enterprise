@@ -56,6 +56,22 @@ def test_resolve_jenkins_url_accepts_full_job_and_build_urls(tmp_path: Path):
     )
 
 
+def test_resolve_jenkins_url_accepts_encoded_full_urls(tmp_path: Path):
+    manager = MultiJenkinsManager(
+        _write_config(
+            tmp_path,
+            {"prod": _instance("https://jenkins.example.com")},
+        )
+    )
+
+    assert (
+        manager.resolve_jenkins_url(
+            "https://jenkins.example.com/job/release%252F2.2.0/123/"
+        )
+        == "prod"
+    )
+
+
 def test_resolve_jenkins_url_accepts_context_path_and_api_urls(tmp_path: Path):
     manager = MultiJenkinsManager(
         _write_config(
@@ -65,7 +81,9 @@ def test_resolve_jenkins_url_accepts_context_path_and_api_urls(tmp_path: Path):
     )
 
     assert manager.resolve_jenkins_url("https://ci.example.com/jenkins") == "corp"
-    assert manager.resolve_jenkins_url("https://ci.example.com/jenkins/api/json") == "corp"
+    assert (
+        manager.resolve_jenkins_url("https://ci.example.com/jenkins/api/json") == "corp"
+    )
     assert (
         manager.resolve_jenkins_url(
             "https://ci.example.com/jenkins/job/TeamA/job/my-pipeline/123/api/json"
@@ -74,7 +92,9 @@ def test_resolve_jenkins_url_accepts_context_path_and_api_urls(tmp_path: Path):
     )
 
 
-def test_resolve_jenkins_url_accepts_missing_scheme_when_match_is_unique(tmp_path: Path):
+def test_resolve_jenkins_url_accepts_missing_scheme_when_match_is_unique(
+    tmp_path: Path,
+):
     manager = MultiJenkinsManager(
         _write_config(
             tmp_path,
@@ -82,7 +102,9 @@ def test_resolve_jenkins_url_accepts_missing_scheme_when_match_is_unique(tmp_pat
         )
     )
 
-    assert manager.resolve_jenkins_url("ci.example.com/jenkins/job/example/42") == "corp"
+    assert (
+        manager.resolve_jenkins_url("ci.example.com/jenkins/job/example/42") == "corp"
+    )
 
 
 def test_resolve_jenkins_url_reports_ambiguous_matches(tmp_path: Path):

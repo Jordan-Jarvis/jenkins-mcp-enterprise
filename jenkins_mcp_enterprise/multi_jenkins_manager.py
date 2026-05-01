@@ -278,7 +278,9 @@ class MultiJenkinsManager:
 
         for marker in ("/job/", "/view/"):
             if marker in normalized:
-                candidates.append(cls._normalize_url_path(normalized.split(marker, 1)[0]))
+                candidates.append(
+                    cls._normalize_url_path(normalized.split(marker, 1)[0])
+                )
 
         if "/api/" in normalized:
             candidates.append(cls._normalize_url_path(normalized.split("/api/", 1)[0]))
@@ -292,13 +294,15 @@ class MultiJenkinsManager:
 
     def resolve_jenkins_url(self, url: str) -> str:
         """Resolve a Jenkins URL to an instance ID, with validation"""
-        input_scheme, input_netloc, input_path = self._parse_jenkins_url_for_matching(url)
+        input_scheme, input_netloc, input_path = self._parse_jenkins_url_for_matching(
+            url
+        )
         candidate_paths = self._candidate_base_paths(input_path)
         matches: List[tuple[str, JenkinsInstanceConfig]] = []
 
         for instance_id, config in self.instances_config.items():
-            config_scheme, config_netloc, config_path = self._parse_jenkins_url_for_matching(
-                config.url
+            config_scheme, config_netloc, config_path = (
+                self._parse_jenkins_url_for_matching(config.url)
             )
             if input_netloc != config_netloc:
                 continue
