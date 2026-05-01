@@ -25,7 +25,7 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 COPY jenkins_mcp_enterprise/ ./jenkins_mcp_enterprise/
 COPY tests/ ./tests/
 COPY scripts/ ./scripts/
-COPY README.md CLAUDE.md LICENSE ./
+COPY README.md LICENSE ./
 RUN chmod +x /app/scripts/docker-entrypoint.sh
 
 # Install the package in development mode
