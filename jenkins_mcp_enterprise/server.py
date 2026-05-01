@@ -228,18 +228,15 @@ def register_jenkins_resources(mcp: FastMCP, multi_jenkins_manager) -> None:
     # Legacy/deprecated: this resource is structurally brittle for full URLs (slashes). Keep it for compatibility.
     @mcp.resource("jenkins://resolve/{url}")
     def resolve_jenkins_url(url: str) -> dict:
-        """Resolve a Jenkins base URL to a configured instance (deprecated).
+        """Resolve a Jenkins URL to a configured instance (deprecated).
 
         Prefer using tools with 'jenkins_url', or read `jenkins://instances`.
         """
         # Accept URL-encoded forms (e.g., https%3A%2F%2Fjenkins.example.com)
-        decoded = urllib.parse.unquote(url).rstrip("/")
-        clean_url = decoded
-        if not clean_url.startswith(("http://", "https://")):
-            clean_url = f"https://{clean_url}"
+        decoded = urllib.parse.unquote(url)
 
         try:
-            instance_id = multi_jenkins_manager.resolve_jenkins_url(clean_url)
+            instance_id = multi_jenkins_manager.resolve_jenkins_url(decoded)
             cfg = multi_jenkins_manager.instances_config[instance_id]
             return {
                 "status": "configured",
@@ -251,7 +248,7 @@ def register_jenkins_resources(mcp: FastMCP, multi_jenkins_manager) -> None:
         except Exception as e:
             return {
                 "status": "not_configured",
-                "url": clean_url,
+                "url": decoded,
                 "message": str(e),
                 "deprecated": True,
             }

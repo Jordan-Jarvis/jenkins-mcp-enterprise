@@ -5,6 +5,7 @@ Multi-Jenkins Instance Manager for MCP Roots Implementation
 
 import os
 import threading
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -241,33 +242,103 @@ class MultiJenkinsManager:
                 f"No valid roots specified, using fallback: {self.active_roots[0]}"
             )
 
+    @staticmethod
+    def _normalize_url_path(path: str) -> str:
+        """Normalize a URL path for Jenkins instance matching."""
+        decoded = urllib.parse.unquote(path or "")
+        if decoded in ("", "/"):
+            return ""
+        return decoded.rstrip("/")
+
+    @classmethod
+    def _parse_jenkins_url_for_matching(
+        cls, url: str
+    ) -> tuple[Optional[str], str, str]:
+        """Parse a Jenkins URL or URL-like string into matchable parts."""
+        decoded = urllib.parse.unquote((url or "").strip())
+        if not decoded:
+            raise ConfigurationError("No Jenkins URL provided")
+
+        has_scheme = decoded.startswith(("http://", "https://"))
+        parse_target = decoded if has_scheme else f"//{decoded.lstrip('/')}"
+        parsed = urllib.parse.urlsplit(parse_target)
+        netloc = parsed.netloc.lower()
+        if not netloc:
+            raise ConfigurationError(f"Invalid Jenkins URL: {url}")
+
+        scheme = parsed.scheme.lower() if has_scheme and parsed.scheme else None
+        path = cls._normalize_url_path(parsed.path)
+        return scheme, netloc, path
+
+    @classmethod
+    def _candidate_base_paths(cls, path: str) -> List[str]:
+        """Generate Jenkins base-path candidates from a base/job/build URL path."""
+        normalized = cls._normalize_url_path(path)
+        candidates: List[str] = [normalized]
+
+        for marker in ("/job/", "/view/"):
+            if marker in normalized:
+                candidates.append(
+                    cls._normalize_url_path(normalized.split(marker, 1)[0])
+                )
+
+        if "/api/" in normalized:
+            candidates.append(cls._normalize_url_path(normalized.split("/api/", 1)[0]))
+
+        deduped: List[str] = []
+        for candidate in candidates:
+            if candidate not in deduped:
+                deduped.append(candidate)
+
+        return deduped
+
     def resolve_jenkins_url(self, url: str) -> str:
         """Resolve a Jenkins URL to an instance ID, with validation"""
-        # Clean up the URL
-        clean_url = url.rstrip("/")
-        if not clean_url.startswith(("http://", "https://")):
-            clean_url = f"https://{clean_url}"
+        input_scheme, input_netloc, input_path = self._parse_jenkins_url_for_matching(
+            url
+        )
+        candidate_paths = self._candidate_base_paths(input_path)
+        matches: List[tuple[str, JenkinsInstanceConfig]] = []
 
-        # Find matching instance
         for instance_id, config in self.instances_config.items():
-            config_url = config.url.rstrip("/")
-            if clean_url == config_url:
-                # Validate credentials exist
-                if not config.token or not config.username:
-                    available_urls = [cfg.url for cfg in self.instances_config.values()]
-                    raise ConfigurationError(
-                        f"No credentials configured for Jenkins instance at {clean_url}. "
-                        f"Available Jenkins instances with credentials: {available_urls}"
-                    )
-                return instance_id
+            config_scheme, config_netloc, config_path = (
+                self._parse_jenkins_url_for_matching(config.url)
+            )
+            if input_netloc != config_netloc:
+                continue
+            if input_scheme and config_scheme and input_scheme != config_scheme:
+                continue
+            if config_path not in candidate_paths:
+                continue
+            matches.append((instance_id, config))
+
+        if len(matches) > 1:
+            available_urls = [cfg.url for _, cfg in matches]
+            raise ConfigurationError(
+                "Multiple Jenkins instances match URL: "
+                f"{url}\nMatching Jenkins instances:\n"
+                + "\n".join([f"  - {cfg_url}" for cfg_url in available_urls])
+                + "\n\nSpecify the exact Jenkins base URL to disambiguate."
+            )
+
+        if len(matches) == 1:
+            instance_id, config = matches[0]
+            if not config.token or not config.username:
+                available_urls = [cfg.url for cfg in self.instances_config.values()]
+                raise ConfigurationError(
+                    f"No credentials configured for Jenkins instance at {config.url}. "
+                    f"Available Jenkins instances with credentials: {available_urls}"
+                )
+            return instance_id
 
         # No match found - provide helpful error
         available_urls = [cfg.url for cfg in self.instances_config.values()]
         raise ConfigurationError(
-            f"No Jenkins instance configured for URL: {clean_url}\n"
+            f"No Jenkins instance configured for URL: {url}\n"
             f"Available Jenkins instances:\n"
             + "\n".join([f"  - {url}" for url in available_urls])
-            + f"\n\nTo use a Jenkins instance, specify one of the URLs above exactly as shown."
+            + "\n\nUse one of the configured Jenkins base URLs above, or any full Jenkins "
+            "job/build URL rooted under one of those bases."
         )
 
     def get_usage_instructions(self) -> str:
@@ -283,8 +354,10 @@ class MultiJenkinsManager:
         return (
             f"Available Jenkins instances ({len(self.instances_config)} configured):\n"
             + "\n".join(instances)
-            + "\n\nTo specify a Jenkins instance, use the exact URL format above. "
-            "For example: 'https://jenkins.example.com'"
+            + "\n\nPass the configured Jenkins base URL above (preferred), or a full "
+            "Jenkins job/build URL rooted under one of those bases. "
+            "For example: 'https://jenkins.example.com' or "
+            "'https://jenkins.example.com/job/example/123/'."
         )
 
     def get_jenkins_client(self, instance_id: Optional[str] = None) -> JenkinsClient:

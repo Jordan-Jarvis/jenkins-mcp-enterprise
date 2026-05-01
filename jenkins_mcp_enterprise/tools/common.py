@@ -73,8 +73,10 @@ class CommonParameters:
         return ParameterSpec(
             "jenkins_url",
             str,
-            "Jenkins instance URL (e.g., 'https://jenkins.example.com'). "
-            "REQUIRED - jobs are load-balanced across multiple servers.",
+            "Jenkins instance URL. Pass the configured Jenkins base URL "
+            "(preferred) or a full Jenkins job/build URL rooted under that "
+            "instance. REQUIRED - tools resolve exactly one Jenkins instance "
+            "per call across multiple servers.",
             required=True,
         )
 
