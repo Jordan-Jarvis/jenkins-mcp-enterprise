@@ -3,17 +3,31 @@
 import os
 from typing import Any, Dict, List, Optional
 
-from qdrant_client import QdrantClient
-from qdrant_client.models import (
-    Distance,
-    FieldCondition,
-    Filter,
-    MatchValue,
-    PointStruct,
-    Range,
-    VectorParams,
-)
-from sentence_transformers import SentenceTransformer
+try:
+    from qdrant_client import QdrantClient
+    from qdrant_client.models import (
+        Distance,
+        FieldCondition,
+        Filter,
+        MatchValue,
+        PointStruct,
+        Range,
+        VectorParams,
+    )
+except ImportError:
+    QdrantClient = None
+    Distance = None
+    FieldCondition = None
+    Filter = None
+    MatchValue = None
+    PointStruct = None
+    Range = None
+    VectorParams = None
+
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    SentenceTransformer = None
 
 from .base import Build, VectorChunk
 from .config import VectorConfig
@@ -49,6 +63,12 @@ class QdrantVectorManager:
             self.embedding_dim = 384  # Default dimension
             self.collection_name = config.collection_name
             return
+
+        if QdrantClient is None or SentenceTransformer is None:
+            raise VectorStoreError(
+                "Vector search dependencies are not installed. "
+                "Install the vector extras or disable vector search."
+            )
 
         # Initialize Qdrant client
         try:
