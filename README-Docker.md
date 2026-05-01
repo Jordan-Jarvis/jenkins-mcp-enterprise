@@ -1,72 +1,50 @@
-# Jenkins MCP Enterprise Server - Docker Deployment
+# Docker deployment
 
-This repo includes a Docker Compose stack for running the Jenkins MCP Enterprise Server in **streamable HTTP** mode, plus an optional **Qdrant** container for vector search.
+Use this path when you want to run the Jenkins MCP server in `streamable-http` mode with Docker Compose.
 
-## Quick Start
+What this stack includes:
+- `jenkins_mcp_enterprise-server` on `http://localhost:8000`
+- `qdrant` on `http://localhost:6333`
 
-### 1. Configure your Jenkins instances
+Before you start:
+- Docker must be running
+- create `config/mcp-config.yml` from the checked-in example
+
+## Quick start
 
 ```bash
 cp config/mcp-config.example.yml config/mcp-config.yml
-# edit config/mcp-config.yml with your Jenkins URLs + credentials
-```
+# edit config/mcp-config.yml with your Jenkins URLs and credentials
 
-### 2. Start the stack
-
-```bash
 ./start-jenkins_mcp_enterprise.sh
 ```
 
-Or run Docker Compose directly:
+The helper script:
+- validates that `config/mcp-config.yml` exists
+- uses `docker compose` when available
+- builds and starts the stack
+- waits for the server health endpoint before returning
+
+If you prefer raw Compose commands:
 
 ```bash
 docker compose up -d --build
-```
-
-### 3. Access services
-
-- **MCP Server health**: `http://localhost:8000/health`
-- **MCP Streamable HTTP endpoint**: `http://localhost:8000/mcp`
-- **Qdrant Dashboard**: `http://localhost:6333/dashboard`
-
-## What’s in the stack
-
-- **`docker-compose.yml`**: Compose file (server + qdrant)
-- **`Dockerfile`**: Jenkins MCP Enterprise server container
-- **`start-jenkins_mcp_enterprise.sh`**: convenience script
-
-## Common commands
-
-```bash
-# Start / rebuild
-docker compose up -d --build
-
-# Status
 docker compose ps
-
-# Logs
-docker compose logs -f
 docker compose logs -f jenkins_mcp_enterprise-server
-docker compose logs -f qdrant
-
-# Stop / remove
 docker compose down
 ```
 
-## Optional: enable vector/semantic search in Docker
+## Endpoints
 
-By default, the Docker image is built **without** vector search dependencies (keeps builds fast and images small).
+- MCP server health: `http://localhost:8000/health`
+- MCP streamable HTTP endpoint: `http://localhost:8000/mcp`
+- Qdrant dashboard: `http://localhost:6333/dashboard`
 
-To build an image with vector search support:
+## Vector search
 
-```bash
-docker build -t jenkins_mcp_enterprise-server:vector --build-arg INSTALL_VECTOR_DEPS=true .
-```
+Vector search is disabled by default to keep builds smaller and faster.
 
-Then run it with vector search enabled and Qdrant available (either via `docker compose` or another Qdrant instance),
-and set `DISABLE_VECTOR_SEARCH=false`.
-
-If you are using `docker compose`, you can also do this in one shot:
+To enable it:
 
 ```bash
 INSTALL_VECTOR_DEPS=true DISABLE_VECTOR_SEARCH=false docker compose up -d --build
@@ -74,18 +52,15 @@ INSTALL_VECTOR_DEPS=true DISABLE_VECTOR_SEARCH=false docker compose up -d --buil
 
 ## Troubleshooting
 
+If startup fails:
+
 ```bash
-# Confirm Docker is working
 docker info
-
-# Rebuild from scratch
-docker compose build --no-cache
-
-# View server logs
+docker compose ps
 docker compose logs -f jenkins_mcp_enterprise-server
+docker compose logs -f qdrant
 ```
 
-## Port conflicts
-
-- **Server**: change the `8000:8000` mapping in `docker-compose.yml`
-- **Qdrant**: change the `6333:6333` mapping in `docker-compose.yml`
+Port conflicts:
+- change `8000:8000` in `docker-compose.yml` for the MCP server
+- change `6333:6333` in `docker-compose.yml` for Qdrant
