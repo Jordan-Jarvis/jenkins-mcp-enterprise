@@ -37,18 +37,13 @@ class BuildManager:
         if params is None:
             params = {}
 
-        # Use provided token or fall back to configured token
-        auth_token = token or self.connection.config.token
-
         try:
-            # Check if job exists before triggering
-            # It's better to attempt the build and handle the 404, as a separate
-            # job_exists check can be slow and racy.
-            # if not self.connection.client.job_exists(job_name):
-            #     raise BuildNotFoundError(f"Job '{job_name}' not found.")
+            build_kwargs: Dict[str, Any] = {"parameters": params}
+            if token is not None:
+                build_kwargs["token"] = token
 
             queue_item_number = self.connection.client.build_job(
-                job_name, parameters=params, token=auth_token
+                job_name, **build_kwargs
             )
 
             if not queue_item_number:
@@ -90,19 +85,13 @@ class BuildManager:
                 time.sleep(2)
 
             except Exception as e:
-                # This can happen if the build starts and leaves the queue
-                # before we can query it. In this case, we can try to find
-                # the build number from the job's recent builds.
-                logger.warning(
-                    f"Queue item {queue_item_number} not found, attempting to find recent build for {job_name}"
-                )
-                try:
+                if "NotFoundException" in str(type(e)):
+                    # Queue item disappeared, try to find the build
                     return self._find_recent_build(job_name)
-                except BuildNotFoundError:
+                else:
                     logger.warning(
-                        f"Could not find recent build for {job_name} after queue item disappeared."
+                        f"Error checking queue item {queue_item_number}: {e}"
                     )
-                    # Continue loop in case of a race condition
                     time.sleep(2)
 
         raise JenkinsConnectionError(

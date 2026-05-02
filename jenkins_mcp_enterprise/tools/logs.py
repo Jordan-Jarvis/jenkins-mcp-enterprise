@@ -150,7 +150,7 @@ class FilterErrorsTool(LogOperationTool):
 
     @property
     def description(self) -> str:
-        return "🔍 SMART GREP: Intelligently scans logs with relevance scoring, reverse search, and deduplication. Use 'preset:critical' for high-priority errors or 'preset:all' for broad search. IMPORTANT: jenkins_url is required because jobs are load-balanced across multiple Jenkins servers."
+        return "Intelligently scans logs with relevance scoring, reverse search, and deduplication. Use 'preset:critical' for high-priority errors or 'preset:all' for broad search. IMPORTANT: jenkins_url is required because jobs are load-balanced across multiple Jenkins servers."
 
     @property
     def parameters(self) -> List[ParameterSpec]:
