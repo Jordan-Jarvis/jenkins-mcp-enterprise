@@ -346,8 +346,22 @@ def load_config_from_yaml(config_path: str) -> MCPConfig:
     with open(config_file, "r") as f:
         config_data = yaml.safe_load(f)
 
-    # Extract default instance for backward compatibility
+    # Extract a single Jenkins instance for backward compatibility.
+    #
+    # The runtime server uses MultiJenkinsManager for the real multi-instance
+    # behavior, but several legacy components still require an MCPConfig with a
+    # concrete JenkinsConfig. Prefer `default_instance` when present. Otherwise
+    # derive the legacy view from `settings.fallback_instance` or the first
+    # configured `jenkins_instances` entry.
     default_inst = config_data.get("default_instance", {})
+    if not default_inst:
+        instances = config_data.get("jenkins_instances", {}) or {}
+        fallback_id = (config_data.get("settings", {}) or {}).get("fallback_instance")
+        if fallback_id and fallback_id in instances:
+            default_inst = instances[fallback_id]
+        elif instances:
+            default_inst = next(iter(instances.values()))
+
     jenkins_config = JenkinsConfig(
         url=default_inst.get("url", ""),
         username=default_inst.get("username", ""),

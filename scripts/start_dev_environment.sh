@@ -1,8 +1,20 @@
 #!/bin/bash
 # Start development environment with Qdrant
 
+set -euo pipefail
+
 echo "🚀 Starting Jenkins MCP Enterprise Server Development Environment"
 echo "======================================================"
+
+if docker compose version > /dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker compose)
+elif command -v docker-compose > /dev/null 2>&1; then
+    DOCKER_COMPOSE=(docker-compose)
+else
+    echo "❌ Docker Compose is not installed."
+    echo "Install Docker Desktop (recommended) or the Docker Compose plugin."
+    exit 1
+fi
 
 # Check if Docker is running
 if ! docker info > /dev/null 2>&1; then
@@ -11,7 +23,7 @@ if ! docker info > /dev/null 2>&1; then
 fi
 
 echo "📦 Starting Qdrant vector database..."
-# docker-compose up -d qdrant
+"${DOCKER_COMPOSE[@]}" up -d qdrant
 
 # Wait for Qdrant to be ready
 echo "⏳ Waiting for Qdrant to be ready..."
@@ -28,7 +40,7 @@ done
 
 if [ $RETRIES -eq 0 ]; then
     echo "❌ Qdrant failed to start within 60 seconds"
-    docker-compose logs qdrant
+    "${DOCKER_COMPOSE[@]}" logs qdrant
     exit 1
 fi
 
@@ -42,7 +54,7 @@ echo ""
 echo "📁 Vector Data Storage: Docker volume 'qdrant_data'"
 echo ""
 echo "To stop the environment:"
-echo "  docker-compose down"
+echo "  ${DOCKER_COMPOSE[*]} down"
 echo ""
 echo "To stop and remove data:"
-echo "  docker-compose down -v"
+echo "  ${DOCKER_COMPOSE[*]} down -v"
