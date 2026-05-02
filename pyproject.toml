@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jenkins_mcp_enterprise"
-version = "1.0.3b2"
+version = "1.0.3b3"
 description = "MCP server for Jenkins integration with AI assistants, providing build management, log analysis, and failure diagnostics."
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -29,7 +29,7 @@ dependencies = [
     "python-jenkins>=1.8.2",
     "requests>=2.31.0",
     "tiktoken>=0.5.0",
-    "APScheduler>=3.11.0",
+    "APScheduler>=3.11.0,<4",
     "modelcontextprotocol>=0.1.0",
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
