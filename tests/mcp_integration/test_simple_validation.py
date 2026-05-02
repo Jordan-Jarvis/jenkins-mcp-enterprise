@@ -1,6 +1,7 @@
 """Simple validation tests for MCP integration framework"""
 
 import asyncio
+import os
 import shutil
 import subprocess
 import sys
@@ -20,9 +21,10 @@ class TestSimpleValidation:
     @pytest_asyncio.fixture
     async def simple_jenkins(self):
         """Simple Jenkins test double"""
-        jenkins = JenkinsTestDouble(port=18083)
+        jenkins = JenkinsTestDouble(port=0)
         jenkins.add_job("sample-job", {"name": "sample-job", "nextBuildNumber": 42})
         jenkins.start()
+        jenkins.port = jenkins.server.server_port
 
         yield jenkins
 
@@ -33,7 +35,7 @@ class TestSimpleValidation:
         """Test that Jenkins test double works correctly"""
         # Simple test that the test double is running
         assert simple_jenkins is not None
-        assert simple_jenkins.port == 18083
+        assert simple_jenkins.port > 0
         import requests
 
         # Test whoami endpoint
@@ -58,6 +60,11 @@ class TestSimpleValidation:
     async def test_tool_validator_with_real_jenkins(self):
         """Test tool validator with real Jenkins credentials"""
         from jenkins_mcp_enterprise.tool_validator import validate_all_tools
+
+        if not os.getenv("JENKINS_URL") or not os.getenv("JENKINS_TOKEN"):
+            pytest.skip(
+                "Real Jenkins validation requires JENKINS_URL and JENKINS_TOKEN"
+            )
 
         # Run with real Jenkins
         success = validate_all_tools(use_real_jenkins=True)
@@ -151,8 +158,8 @@ class TestSimpleValidation:
         from .test_doubles import JenkinsTestDouble, QdrantTestDouble
 
         # Test that test doubles can be instantiated
-        jenkins = JenkinsTestDouble(port=18084)
-        qdrant = QdrantTestDouble(port=16336)
+        jenkins = JenkinsTestDouble(port=0)
+        qdrant = QdrantTestDouble(port=0)
 
         # Test that MCP test client can be instantiated
         client = MCPTestClient("dummy_server.py", {"test": "config"})
@@ -164,6 +171,8 @@ class TestSimpleValidation:
         # Test that test doubles can start and stop
         jenkins.start()
         qdrant.start()
+        jenkins.port = jenkins.server.server_port
+        qdrant.port = qdrant.server.server_port
 
         # Basic connectivity test
         import requests

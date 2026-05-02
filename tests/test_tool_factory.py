@@ -5,10 +5,13 @@ from jenkins_mcp_enterprise.tool_factory import ToolFactory
 
 
 class FakeContainer(DIContainer):
-    def __init__(self, vector_search_disabled):
+    def __init__(self, vector_search_disabled, job_editing_enabled=False):
         self._jenkins_client = Mock()
         self._cache_manager = Mock()
         self._multi_jenkins_manager = Mock()
+        self._multi_jenkins_manager.settings = {
+            "enable_job_editing": job_editing_enabled
+        }
         self._vector_manager = Mock()
         self._vector_manager.vector_search_disabled = vector_search_disabled
 
@@ -31,7 +34,8 @@ def test_tool_factory_omits_semantic_search_when_vector_search_disabled():
     tools = factory.create_tools()
 
     assert "semantic_search" not in tools
-    assert factory.get_tool_count() == 9
+    assert "apply_job_edit" not in tools
+    assert factory.get_tool_count() == 13
 
 
 def test_tool_factory_includes_semantic_search_when_vector_search_enabled():
@@ -40,4 +44,15 @@ def test_tool_factory_includes_semantic_search_when_vector_search_enabled():
     tools = factory.create_tools()
 
     assert "semantic_search" in tools
-    assert factory.get_tool_count() == 10
+    assert factory.get_tool_count() == 14
+
+
+def test_tool_factory_registers_xml_edit_tool_only_when_enabled():
+    factory = ToolFactory(
+        FakeContainer(vector_search_disabled=True, job_editing_enabled=True)
+    )
+
+    tools = factory.create_tools()
+
+    assert "apply_job_edit" in tools
+    assert factory.get_tool_count() == 14

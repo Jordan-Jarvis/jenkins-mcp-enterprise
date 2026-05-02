@@ -7,11 +7,15 @@ A Model Context Protocol (MCP) server for Jenkins that provides build management
 ## What It Does
 
 - Trigger builds synchronously or asynchronously
+- Find jobs before triggering or inspecting them
+- Inspect job definitions and source locations
 - Retrieve logs and run targeted log-search tools
 - Discover downstream and sub-build hierarchies
+- Inspect recent builds or a window around a specific build
 - Diagnose build failures with configurable recommendations
 - Route each tool call to the correct Jenkins instance based on `jenkins_url`
 - Expose `semantic_search` only when vector search is enabled
+- Expose `apply_job_edit` only when server-side job editing is enabled
 
 ## Quick Start
 
@@ -52,6 +56,14 @@ cp config/mcp-config.example.yml config/mcp-config.yml
 ```
 
 Edit `config/mcp-config.yml` with your Jenkins URLs and credentials.
+
+If you want the optional Jenkins-managed job edit workflow for non-SCM-backed jobs, also set:
+
+```yaml
+settings:
+  enable_job_editing: true
+  job_edit_workspace_dir: "/tmp/mcp-jenkins/job-definitions"
+```
 
 ### Optional Project-Local Diagnostic Override
 
@@ -109,6 +121,8 @@ Add to `~/.claude_desktop_config.json`:
 - Pass full Jenkins build URLs when a tool or prompt relies on `jenkins_url`.
 - In multi-Jenkins setups, each tool call resolves exactly one configured instance from `jenkins_url`. The server does not fan out across all configured Jenkins instances for a single call.
 - `semantic_search` is available only when vector search is enabled.
+- `apply_job_edit` is available only when `settings.enable_job_editing: true`.
+- `get_job_definition` returns SCM location details for SCM-backed pipelines. For inline pipelines, it stages a local Groovy file for patch/edit/upload. For other Jenkins-managed jobs, it stages `config.xml`.
 - `diagnose_build_failure` always uses a diagnostic config layer. If you do not provide a project-local override, the bundled defaults are used.
 - The Docker image includes `ripgrep`, so `ripgrep_search` and `navigate_log` work in container deployments.
 
@@ -125,16 +139,21 @@ Find similar authentication failures in recent builds
 
 | Tool | Purpose |
 |------|---------|
-| `diagnose_build_failure` | AI-assisted failure diagnosis using logs, hierarchy data, and configured recommendations |
-| `semantic_search` | Vector-backed similarity search across log chunks when vector search is enabled |
 | `trigger_build` | Start a build and wait for completion |
 | `trigger_build_async` | Queue a build without waiting for completion |
 | `trigger_build_with_subs` | Trigger a build and track downstream/sub-build execution |
 | `get_jenkins_job_parameters` | Inspect job parameters before triggering builds |
+| `find_jobs` | Search jobs by name, path, or URL on one resolved Jenkins instance |
+| `list_job_builds` | List recent builds for a job, or a small window around a target build number |
+| `get_build_info` | Fetch metadata for a specific build or `lastBuild` |
+| `get_job_definition` | Inspect whether a job is SCM-backed, inline, multibranch, or XML-backed |
 | `ripgrep_search` | Search logs with regex and context windows |
 | `filter_errors_grep` | Filter logs with common error-oriented patterns |
 | `navigate_log` | Jump to sections or occurrences inside a log |
 | `get_log_context` | Fetch targeted log ranges or chunks |
+| `diagnose_build_failure` | AI-assisted failure diagnosis using logs, hierarchy data, and configured recommendations |
+| `semantic_search` | Vector-backed similarity search across log chunks when vector search is enabled |
+| `apply_job_edit` | Upload a locally edited staged job definition back to Jenkins when job editing is enabled |
 
 ## Configuration Documentation
 

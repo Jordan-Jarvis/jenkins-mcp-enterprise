@@ -25,6 +25,7 @@ Without these plugins, sub-build discovery will be limited to log parsing only.
 """
 
 import concurrent.futures
+import copy
 import io
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -33,6 +34,11 @@ import jenkins
 from ..base import Build, ParameterSpec, SubBuild
 from ..cache_manager import CacheManager
 from ..diagnostic_config.diagnostic_config import get_diagnostic_config
+from ..jenkins.build_tree import (
+    annotate_build_tree,
+    flatten_build_tree,
+    prune_build_tree_to_failure_paths,
+)
 from ..jenkins.jenkins_client import JenkinsClient
 from ..jenkins.job_name_utils import JobNameParser
 from ..logging_config import get_component_logger
@@ -176,6 +182,15 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
 
             # Recursively build children for this child
             self._build_hierarchical_structure(sub_builds, child_node)
+
+    def _strip_parent_fields_from_tree(self, node: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove parent pointer fields from output tree nodes to reduce payload size."""
+        node.pop("parent_job_name", None)
+        node.pop("parent_build_number", None)
+        for child in node.get("children", []) or []:
+            if isinstance(child, dict):
+                self._strip_parent_fields_from_tree(child)
+        return node
 
     def _flatten_build_tree(self, build_node: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Flattens the hierarchical build tree for analysis purposes."""
@@ -372,10 +387,12 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
             "vector_indexing_status": "NOT_ATTEMPTED",
             "heuristic_findings": [],
             "semantic_search_highlights": [],
+            "error_analysis": {"errors": [], "semantic_highlights": []},
+            "sub_builds": [],
+            "sub_builds_count": 0,
             "errors": [],
             "sub_build_information": {"build_tree": {}, "guidance": "", "errors": []},
             "build_summary": "",
-            "error_analysis": [],
             "recommendations": [],
             "context_stats": {
                 "total_tokens": 0,
@@ -448,10 +465,37 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
 
         # Get sub-build information
         sub_build_info = self._get_sub_build_information(build, jenkins_client)
-        result["sub_build_information"] = sub_build_info
+        build_tree = sub_build_info.get("build_tree", {}) or {}
+        if build_tree:
+            annotate_build_tree(build_tree)
+            if params["skip_successful_builds"]:
+                analysis_tree = prune_build_tree_to_failure_paths(build_tree)
+            else:
+                analysis_tree = build_tree
+            hierarchy_dicts = flatten_build_tree(analysis_tree)
+            output_tree = self._strip_parent_fields_from_tree(
+                copy.deepcopy(analysis_tree)
+            )
+            sub_build_info["build_tree"] = output_tree
+            result["sub_builds"] = [
+                {
+                    "job_name": node["job_name"],
+                    "build_number": node["build_number"],
+                    "status": node.get("status", "UNKNOWN"),
+                    "url": node.get("url"),
+                    "depth": int(node.get("depth", 0) or 0),
+                    "failed": bool(node.get("failed", False)),
+                    "parent_job_name": node.get("parent_job_name"),
+                    "parent_build_number": node.get("parent_build_number"),
+                }
+                for node in hierarchy_dicts
+                if int(node.get("depth", 0) or 0) != 0
+            ]
+            result["sub_builds_count"] = len(result["sub_builds"])
+        else:
+            hierarchy_dicts = []
 
-        # Build hierarchy for analysis - extract all builds from the tree
-        hierarchy_dicts = self._flatten_build_tree(sub_build_info["build_tree"])
+        result["sub_build_information"] = sub_build_info
 
         # Convert hierarchy dictionaries to Build objects for processing
         hierarchy_builds = []
@@ -481,10 +525,18 @@ class DiagnoseBuildFailureTool(JenkinsOperationTool):
             result["build_summary"] = self._generate_build_summary(
                 build, hierarchy_builds
             )
-            result["semantic_search_highlights"] = self._generate_semantic_highlights(
+            semantic_highlights = self._generate_semantic_highlights(
                 log_chunks, self.vector_manager, build
             )
-            result["error_analysis"] = self._extract_key_failure_patterns(log_chunks)
+            result["semantic_search_highlights"] = semantic_highlights
+            result["error_analysis"] = {
+                "errors": self._extract_error_entries(
+                    log_chunks,
+                    root_build=build,
+                    exclude_root=bool(result["sub_builds"]),
+                ),
+                "semantic_highlights": semantic_highlights,
+            }
             result["recommendations"] = self._generate_recommendations(
                 hierarchy_builds, log_chunks
             )
@@ -618,6 +670,66 @@ Primary Failure Points:
                 patterns.append(pattern)
 
         return patterns[:max_patterns]
+
+    def _extract_error_entries(
+        self,
+        chunks: List,
+        *,
+        root_build: Optional[Build] = None,
+        exclude_root: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """Return structured, size-bounded error entries for MCP responses."""
+        entries: List[Dict[str, Any]] = []
+        failure_patterns = self.config.get_failure_patterns()
+        max_entries = min(
+            10,
+            self.config.config.failure_patterns.max_fallback_patterns,
+        )
+        max_match_text = 600
+        max_context = 2500
+
+        for chunk in chunks:
+            if len(entries) >= max_entries:
+                break
+
+            if (
+                exclude_root
+                and root_build is not None
+                and chunk.build.job_name == root_build.job_name
+                and chunk.build.build_number == root_build.build_number
+            ):
+                continue
+
+            lines = chunk.content.splitlines()
+            match_line = None
+            priority_groups = [
+                ["error"],
+                ["exception"],
+                ["failed", "failure"],
+                failure_patterns,
+            ]
+            for group in priority_groups:
+                for line in lines:
+                    lowered = line.lower()
+                    if any(pattern in lowered for pattern in group):
+                        match_line = line.strip()
+                        break
+                if match_line:
+                    break
+
+            if not match_line:
+                continue
+
+            entries.append(
+                {
+                    "job_name": chunk.build.job_name,
+                    "build_number": chunk.build.build_number,
+                    "match_text": match_line[:max_match_text],
+                    "context": chunk.content[:max_context],
+                }
+            )
+
+        return entries
 
     def _generate_recommendations(
         self, failure_hierarchy: List[Build], chunks: List

@@ -97,6 +97,26 @@ class LogFetcher:
         self.cache_manager = cache_manager
         self.resolver = resolver
 
+    def _normalize_fetch_error(
+        self, job_name: str, build_number: int, jenkins_url: str, error: Exception
+    ) -> Dict[str, Any]:
+        message = str(error)
+        lower = message.lower()
+        if "404" in lower or "not found" in lower:
+            sanitized = (
+                "Build not found. Verify the job_name and build_number exist on the "
+                "selected Jenkins instance."
+            )
+        else:
+            sanitized = f"Failed to fetch log: {message}"
+
+        return {
+            "job_name": job_name,
+            "build_number": build_number,
+            "jenkins_url": jenkins_url,
+            "error": sanitized,
+        }
+
     def fetch_log(
         self, job_name: str, build_number: int, jenkins_url: str
     ) -> tuple[Optional[str], Optional[Dict[str, Any]]]:
@@ -119,12 +139,9 @@ class LogFetcher:
             log_path = self.cache_manager.fetch(jenkins_client, build_obj)
             return log_path, None
         except Exception as e:
-            return None, {
-                "job_name": job_name,
-                "build_number": build_number,
-                "jenkins_url": jenkins_url,
-                "error": f"Failed to fetch log: {str(e)}",
-            }
+            return None, self._normalize_fetch_error(
+                job_name, build_number, jenkins_url, e
+            )
 
 
 from ..utils import find_ripgrep

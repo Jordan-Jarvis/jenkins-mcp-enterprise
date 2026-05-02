@@ -43,7 +43,15 @@ vector:
 
 5. If you want to tune `diagnose_build_failure`, add `config/diagnostic-parameters.yml`.
 
-6. Start the server with:
+6. If you want the optional Jenkins-managed job edit workflow for non-SCM-backed jobs, set:
+
+```yaml
+settings:
+  enable_job_editing: true
+  job_edit_workspace_dir: "/tmp/mcp-jenkins/job-definitions"
+```
+
+7. Start the server with:
 
 ```bash
 python -m jenkins_mcp_enterprise.server --config config/mcp-config.yml
@@ -93,10 +101,37 @@ Global behavior:
 - `auto_discover_instances`
 - `log_instance_switching`
 - `log_health_checks`
+- `enable_job_editing`
+- `job_edit_workspace_dir`
+
+`enable_job_editing` is `false` by default. When enabled, `get_job_definition` can stage Jenkins-managed job definitions into the local workspace directory, and the server registers `apply_job_edit` so validated edits can be uploaded back to Jenkins. Inline pipelines are staged as Groovy files; XML-managed jobs are staged as `config.xml`. SCM-backed Jenkinsfiles are still edited in source control, not through Jenkins MCP. The older `enable_job_xml_editing` and `job_xml_workspace_dir` keys are still accepted as aliases.
 
 ### `vector`
 
 Controls semantic search. If `disable_vector_search: true`, the `semantic_search` tool is not registered.
+
+## Tool Registration Notes
+
+The tool surface is mostly static, with two conditional tools:
+
+- `semantic_search` is registered only when vector search is enabled
+- `apply_job_edit` is registered only when `settings.enable_job_editing: true`
+
+The main always-on tool set includes:
+
+- `trigger_build`
+- `trigger_build_async`
+- `trigger_build_with_subs`
+- `get_jenkins_job_parameters`
+- `find_jobs`
+- `list_job_builds`
+- `get_build_info`
+- `get_job_definition`
+- `get_log_context`
+- `filter_errors_grep`
+- `ripgrep_search`
+- `navigate_log`
+- `diagnose_build_failure`
 
 ### `cache`
 

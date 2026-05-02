@@ -77,6 +77,12 @@ settings:
   log_instance_switching: true
   log_health_checks: false
 
+  # Optional: allow downloading Jenkins-managed job definitions locally and
+  # uploading validated edits back through MCP. Inline pipelines are staged as
+  # Groovy files; XML-managed jobs are staged as config.xml files.
+  enable_job_editing: false
+  job_edit_workspace_dir: "/tmp/mcp-jenkins/job-definitions"
+
 # Vector Search Configuration
 vector:
   disable_vector_search: false
