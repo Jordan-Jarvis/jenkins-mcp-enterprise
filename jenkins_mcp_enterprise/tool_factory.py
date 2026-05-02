@@ -16,7 +16,7 @@ from typing import Dict
 from .base import Tool
 from .di_container import DIContainer
 from .tools.diagnostics import DiagnoseBuildFailureTool
-from .tools.jobs import ApplyJobXmlEditTool, FindJobsTool, GetJobDefinitionTool
+from .tools.jobs import ApplyJobEditTool, FindJobsTool, GetJobDefinitionTool
 from .tools.jenkins_tools import GetJobParametersTool
 from .tools.logs import FilterErrorsTool, LogContextTool
 from .tools.ripgrep_tool import NavigateLogTool, RipgrepSearchTool
@@ -147,15 +147,18 @@ class ToolFactory:
 
         if bool(
             getattr(multi_jenkins_manager, "settings", {}).get(
-                "enable_job_xml_editing", False
+                "enable_job_editing",
+                getattr(multi_jenkins_manager, "settings", {}).get(
+                    "enable_job_xml_editing", False
+                ),
             )
         ):
-            apply_job_xml_edit_tool = ApplyJobXmlEditTool(
+            apply_job_edit_tool = ApplyJobEditTool(
                 jenkins_client=jenkins_client,
                 cache_manager=cache_manager,
                 multi_jenkins_manager=multi_jenkins_manager,
             )
-            tools[apply_job_xml_edit_tool.name] = apply_job_xml_edit_tool
+            tools[apply_job_edit_tool.name] = apply_job_edit_tool
 
         # Tools requiring JenkinsClient, CacheManager, and VectorManager (now with multi-instance support)
         if not getattr(vector_manager, "vector_search_disabled", False):
@@ -215,7 +218,10 @@ class ToolFactory:
         multi_jenkins_manager = self.container.get_multi_jenkins_manager()
         if bool(
             getattr(multi_jenkins_manager, "settings", {}).get(
-                "enable_job_xml_editing", False
+                "enable_job_editing",
+                getattr(multi_jenkins_manager, "settings", {}).get(
+                    "enable_job_xml_editing", False
+                ),
             )
         ):
             count += 1

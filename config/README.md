@@ -43,12 +43,12 @@ vector:
 
 5. If you want to tune `diagnose_build_failure`, add `config/diagnostic-parameters.yml`.
 
-6. If you want the optional Jenkins XML edit workflow for non-SCM-backed jobs, set:
+6. If you want the optional Jenkins-managed job edit workflow for non-SCM-backed jobs, set:
 
 ```yaml
 settings:
-  enable_job_xml_editing: true
-  job_xml_workspace_dir: "/tmp/mcp-jenkins/job-definitions"
+  enable_job_editing: true
+  job_edit_workspace_dir: "/tmp/mcp-jenkins/job-definitions"
 ```
 
 7. Start the server with:
@@ -101,10 +101,10 @@ Global behavior:
 - `auto_discover_instances`
 - `log_instance_switching`
 - `log_health_checks`
-- `enable_job_xml_editing`
-- `job_xml_workspace_dir`
+- `enable_job_editing`
+- `job_edit_workspace_dir`
 
-`enable_job_xml_editing` is `false` by default. When enabled, `get_job_definition` can download a Jenkins job `config.xml` into the local workspace directory, and the server registers `apply_job_xml_edit` so the edited XML can be uploaded back to Jenkins. This is intended for Jenkins-managed XML jobs and inline pipeline definitions, not SCM-backed Jenkinsfiles.
+`enable_job_editing` is `false` by default. When enabled, `get_job_definition` can stage Jenkins-managed job definitions into the local workspace directory, and the server registers `apply_job_edit` so validated edits can be uploaded back to Jenkins. Inline pipelines are staged as Groovy files; XML-managed jobs are staged as `config.xml`. SCM-backed Jenkinsfiles are still edited in source control, not through Jenkins MCP. The older `enable_job_xml_editing` and `job_xml_workspace_dir` keys are still accepted as aliases.
 
 ### `vector`
 
@@ -115,7 +115,7 @@ Controls semantic search. If `disable_vector_search: true`, the `semantic_search
 The tool surface is mostly static, with two conditional tools:
 
 - `semantic_search` is registered only when vector search is enabled
-- `apply_job_xml_edit` is registered only when `settings.enable_job_xml_editing: true`
+- `apply_job_edit` is registered only when `settings.enable_job_editing: true`
 
 The main always-on tool set includes:
 

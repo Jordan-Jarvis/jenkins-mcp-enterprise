@@ -15,7 +15,7 @@ A Model Context Protocol (MCP) server for Jenkins that provides build management
 - Diagnose build failures with configurable recommendations
 - Route each tool call to the correct Jenkins instance based on `jenkins_url`
 - Expose `semantic_search` only when vector search is enabled
-- Expose `apply_job_xml_edit` only when server-side XML editing is enabled
+- Expose `apply_job_edit` only when server-side job editing is enabled
 
 ## Quick Start
 
@@ -57,12 +57,12 @@ cp config/mcp-config.example.yml config/mcp-config.yml
 
 Edit `config/mcp-config.yml` with your Jenkins URLs and credentials.
 
-If you want the optional Jenkins XML edit workflow for non-SCM-backed jobs, also set:
+If you want the optional Jenkins-managed job edit workflow for non-SCM-backed jobs, also set:
 
 ```yaml
 settings:
-  enable_job_xml_editing: true
-  job_xml_workspace_dir: "/tmp/mcp-jenkins/job-definitions"
+  enable_job_editing: true
+  job_edit_workspace_dir: "/tmp/mcp-jenkins/job-definitions"
 ```
 
 ### Optional Project-Local Diagnostic Override
@@ -121,8 +121,8 @@ Add to `~/.claude_desktop_config.json`:
 - Pass full Jenkins build URLs when a tool or prompt relies on `jenkins_url`.
 - In multi-Jenkins setups, each tool call resolves exactly one configured instance from `jenkins_url`. The server does not fan out across all configured Jenkins instances for a single call.
 - `semantic_search` is available only when vector search is enabled.
-- `apply_job_xml_edit` is available only when `settings.enable_job_xml_editing: true`.
-- `get_job_definition` returns SCM location details for SCM-backed pipelines. For inline or XML-backed jobs, it can stage `config.xml` locally for patch/edit/upload when XML editing is enabled.
+- `apply_job_edit` is available only when `settings.enable_job_editing: true`.
+- `get_job_definition` returns SCM location details for SCM-backed pipelines. For inline pipelines, it stages a local Groovy file for patch/edit/upload. For other Jenkins-managed jobs, it stages `config.xml`.
 - `diagnose_build_failure` always uses a diagnostic config layer. If you do not provide a project-local override, the bundled defaults are used.
 - The Docker image includes `ripgrep`, so `ripgrep_search` and `navigate_log` work in container deployments.
 
@@ -153,7 +153,7 @@ Find similar authentication failures in recent builds
 | `get_log_context` | Fetch targeted log ranges or chunks |
 | `diagnose_build_failure` | AI-assisted failure diagnosis using logs, hierarchy data, and configured recommendations |
 | `semantic_search` | Vector-backed similarity search across log chunks when vector search is enabled |
-| `apply_job_xml_edit` | Upload a locally edited Jenkins `config.xml` back to Jenkins when XML editing is enabled |
+| `apply_job_edit` | Upload a locally edited staged job definition back to Jenkins when job editing is enabled |
 
 ## Configuration Documentation
 

@@ -17,6 +17,9 @@ from .common import CommonParameters
 DEFAULT_FIND_LIMIT = 25
 MAX_FIND_LIMIT = 200
 DEFAULT_INLINE_SCRIPT_CHARS = 20000
+INLINE_PIPELINE_SCRIPT_FILENAME = "pipeline.groovy"
+JOB_XML_FILENAME = "config.xml"
+SCRIPT_COMPILE_DESCRIPTOR = "org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition"
 
 
 def _sanitize_path_segment(value: str) -> str:
@@ -28,28 +31,38 @@ def _clamp_find_limit(value: int) -> int:
     return max(1, min(value, MAX_FIND_LIMIT))
 
 
-def _xml_editing_enabled(multi_jenkins_manager) -> bool:
+def _job_editing_enabled(multi_jenkins_manager) -> bool:
     if not multi_jenkins_manager:
         return False
-    return bool(multi_jenkins_manager.settings.get("enable_job_xml_editing", False))
+    settings = getattr(multi_jenkins_manager, "settings", {}) or {}
+    return bool(
+        settings.get(
+            "enable_job_editing", settings.get("enable_job_xml_editing", False)
+        )
+    )
 
 
-def _xml_workspace_root(cache_manager: CacheManager, multi_jenkins_manager) -> Path:
+def _job_edit_workspace_root(
+    cache_manager: CacheManager, multi_jenkins_manager
+) -> Path:
     override = None
     if multi_jenkins_manager:
-        override = multi_jenkins_manager.settings.get("job_xml_workspace_dir")
+        settings = getattr(multi_jenkins_manager, "settings", {}) or {}
+        override = settings.get("job_edit_workspace_dir") or settings.get(
+            "job_xml_workspace_dir"
+        )
     if override:
         return Path(override).expanduser()
     return cache_manager.config.base_dir / "job-definitions"
 
 
-def _job_xml_path(
+def _job_edit_dir(
     cache_manager: CacheManager,
     multi_jenkins_manager,
     instance_id: Optional[str],
     normalized_job_name: str,
 ) -> Path:
-    workspace_root = _xml_workspace_root(cache_manager, multi_jenkins_manager)
+    workspace_root = _job_edit_workspace_root(cache_manager, multi_jenkins_manager)
     instance_segment = _sanitize_path_segment(instance_id or "default")
     job_parts = [
         _sanitize_path_segment(part)
@@ -58,7 +71,41 @@ def _job_xml_path(
     ]
     if not job_parts:
         job_parts = ["unnamed-job"]
-    return workspace_root / instance_segment / Path(*job_parts) / "config.xml"
+    return workspace_root / instance_segment / Path(*job_parts)
+
+
+def _job_xml_path(
+    cache_manager: CacheManager,
+    multi_jenkins_manager,
+    instance_id: Optional[str],
+    normalized_job_name: str,
+) -> Path:
+    return (
+        _job_edit_dir(
+            cache_manager,
+            multi_jenkins_manager,
+            instance_id,
+            normalized_job_name,
+        )
+        / JOB_XML_FILENAME
+    )
+
+
+def _job_inline_script_path(
+    cache_manager: CacheManager,
+    multi_jenkins_manager,
+    instance_id: Optional[str],
+    normalized_job_name: str,
+) -> Path:
+    return (
+        _job_edit_dir(
+            cache_manager,
+            multi_jenkins_manager,
+            instance_id,
+            normalized_job_name,
+        )
+        / INLINE_PIPELINE_SCRIPT_FILENAME
+    )
 
 
 def _extract_first_present(mapping: Dict[str, Any], *keys: str) -> Optional[Any]:
@@ -131,6 +178,14 @@ def _xml_text(node: Optional[ET.Element]) -> Optional[str]:
     return text or None
 
 
+def _classify_inline_pipeline_style(inline_script: Optional[str]) -> Optional[str]:
+    if not inline_script:
+        return None
+    return (
+        "declarative" if inline_script.lstrip().startswith("pipeline") else "scripted"
+    )
+
+
 def _parse_job_definition_xml(xml_text: str) -> Dict[str, Any]:
     """Extract pipeline definition details directly from Jenkins job XML."""
     root = ET.fromstring(xml_text)
@@ -165,12 +220,159 @@ def _parse_job_definition_xml(xml_text: str) -> Dict[str, Any]:
         result["repo_url"] = remote_urls[0] if remote_urls else None
         result["branch_specs"] = branch_specs
     elif definition_class and "CpsFlowDefinition" in definition_class:
+        inline_script = _xml_text(definition.find("script"))
         result["definition_type"] = "inline_pipeline"
-        result["inline_script"] = _xml_text(definition.find("script"))
+        result["inline_script"] = inline_script
+        result["pipeline_style"] = _classify_inline_pipeline_style(inline_script)
     elif root.tag.endswith("WorkflowMultiBranchProject"):
         result["definition_type"] = "multibranch_pipeline"
 
     return result
+
+
+def _build_script_compile_url(jenkins_client: JenkinsClient, job_name: str) -> str:
+    api_job_path = JobNameParser.to_jenkins_api_path(job_name)
+    base_url = jenkins_client.config.url.rstrip("/")
+    return (
+        f"{base_url}/{api_job_path}/descriptorByName/"
+        f"{SCRIPT_COMPILE_DESCRIPTOR}/checkScriptCompile"
+    )
+
+
+def _build_declarative_validation_url(jenkins_client: JenkinsClient) -> str:
+    return (
+        f"{jenkins_client.config.url.rstrip('/')}/pipeline-model-converter/"
+        "validateJenkinsfile"
+    )
+
+
+def _jenkins_post_json(
+    jenkins_client: JenkinsClient, url: str, data: Dict[str, str]
+) -> Any:
+    request = requests.Request("POST", url, data=data)
+    response = jenkins_client.connection.client.jenkins_request(request)
+    return response.json()
+
+
+def _collect_validation_errors(payload: Any) -> List[str]:
+    errors: List[str] = []
+    if isinstance(payload, dict):
+        nested_data = payload.get("data")
+        if isinstance(nested_data, dict):
+            errors.extend(_collect_validation_errors(nested_data))
+            message = payload.get("message") or payload.get("error")
+            if message:
+                errors.append(str(message))
+            return errors
+
+        status = payload.get("status")
+        result = payload.get("result")
+        if status in {"success", "ok"} and result in {None, "success"}:
+            return []
+        if result == "success":
+            return []
+        nested_errors = payload.get("errors")
+        if isinstance(nested_errors, list):
+            for entry in nested_errors:
+                if isinstance(entry, dict):
+                    message = entry.get("message") or entry.get("error")
+                    if message:
+                        errors.append(str(message))
+                elif entry:
+                    errors.append(str(entry))
+        message = payload.get("message") or payload.get("error")
+        if message:
+            errors.append(str(message))
+    elif isinstance(payload, list):
+        for entry in payload:
+            if isinstance(entry, dict):
+                if entry.get("status") == "success":
+                    continue
+                message = entry.get("message") or entry.get("error")
+                if message:
+                    errors.append(str(message))
+            elif entry:
+                errors.append(str(entry))
+    elif payload:
+        errors.append(str(payload))
+    return errors
+
+
+def _validate_declarative_pipeline_script(
+    jenkins_client: JenkinsClient, script_text: str
+) -> Dict[str, Any]:
+    url = _build_declarative_validation_url(jenkins_client)
+    try:
+        payload = _jenkins_post_json(jenkins_client, url, {"jenkinsfile": script_text})
+    except Exception as e:
+        return {
+            "valid": False,
+            "validator": "declarative",
+            "pipeline_style": "declarative",
+            "errors": [f"Declarative pipeline validation request failed: {str(e)}"],
+        }
+
+    errors = _collect_validation_errors(payload)
+    return {
+        "valid": not errors,
+        "validator": "declarative",
+        "pipeline_style": "declarative",
+        "errors": errors,
+    }
+
+
+def _validate_scripted_pipeline_script(
+    jenkins_client: JenkinsClient, job_name: str, script_text: str
+) -> Dict[str, Any]:
+    url = _build_script_compile_url(jenkins_client, job_name)
+    try:
+        payload = _jenkins_post_json(jenkins_client, url, {"value": script_text})
+    except Exception as e:
+        return {
+            "valid": False,
+            "validator": "script_compile",
+            "pipeline_style": "scripted",
+            "errors": [f"Scripted pipeline compile check failed: {str(e)}"],
+        }
+
+    errors = _collect_validation_errors(payload)
+    return {
+        "valid": not errors,
+        "validator": "script_compile",
+        "pipeline_style": "scripted",
+        "errors": errors,
+    }
+
+
+def _validate_pipeline_script(
+    jenkins_client: JenkinsClient,
+    job_name: str,
+    script_text: str,
+    pipeline_style: Optional[str] = None,
+) -> Dict[str, Any]:
+    effective_style = pipeline_style or _classify_inline_pipeline_style(script_text)
+    if effective_style == "declarative":
+        return _validate_declarative_pipeline_script(jenkins_client, script_text)
+    return _validate_scripted_pipeline_script(jenkins_client, job_name, script_text)
+
+
+def _replace_inline_pipeline_script(config_xml_text: str, script_text: str) -> str:
+    root = ET.fromstring(config_xml_text)
+    definition = root.find("definition")
+    if definition is None:
+        raise ValueError("Jenkins job XML is missing a <definition> node.")
+
+    definition_class = definition.get("class") or ""
+    if "CpsFlowDefinition" not in definition_class:
+        raise ValueError(
+            "Jenkins job XML does not contain an inline pipeline definition to edit."
+        )
+
+    script_node = definition.find("script")
+    if script_node is None:
+        script_node = ET.SubElement(definition, "script")
+    script_node.text = script_text
+    return ET.tostring(root, encoding="unicode")
 
 
 class FindJobsTool(JenkinsOperationTool):
@@ -219,7 +421,7 @@ class FindJobsTool(JenkinsOperationTool):
             ParameterSpec(
                 "folder",
                 str,
-                "Optional folder/job path prefix to constrain the search (for example 'team-a/services').",
+                "Optional folder/job path prefix to constrain the search (for example team-a/services).",
                 required=False,
                 default="",
             ),
@@ -300,7 +502,7 @@ class FindJobsTool(JenkinsOperationTool):
 
 
 class GetJobDefinitionTool(JenkinsOperationTool):
-    """Inspect a Jenkins job definition and optionally stage config XML for editing."""
+    """Inspect a Jenkins job definition and optionally stage it for editing."""
 
     def __init__(
         self,
@@ -323,10 +525,10 @@ class GetJobDefinitionTool(JenkinsOperationTool):
         return (
             "Inspects how a Jenkins job is defined. For SCM-backed pipelines, it "
             "returns source-control location details such as repository URL, branch "
-            "spec, and Jenkinsfile/script path. For inline or XML-backed jobs, it "
-            "returns the inline script when present and, if server-side XML editing "
-            "is enabled, downloads the job config XML to a local workspace path and "
-            "returns instructions for patching and re-uploading it."
+            "spec, and Jenkinsfile/script path. For Jenkins-managed jobs, it returns "
+            "inline script text when present and, if server-side job editing is "
+            "enabled, stages either a local Groovy file or job config XML for edit "
+            "and re-upload."
         )
 
     @property
@@ -405,9 +607,10 @@ class GetJobDefinitionTool(JenkinsOperationTool):
         script_path = (
             definition.get("scriptPath") if isinstance(definition, dict) else None
         )
-        inline_script = (
+        full_inline_script = (
             definition.get("script") if isinstance(definition, dict) else None
         )
+        pipeline_style = _classify_inline_pipeline_style(full_inline_script)
 
         definition_type = "job_config_xml"
         if "CpsScmFlowDefinition" in definition_class:
@@ -424,18 +627,19 @@ class GetJobDefinitionTool(JenkinsOperationTool):
             script_path = script_path or mb_script_path
 
         config_xml_text = None
-        xml_edit_enabled = _xml_editing_enabled(self.multi_jenkins_manager)
+        job_edit_enabled = _job_editing_enabled(self.multi_jenkins_manager)
         needs_xml_fallback = (
             not definition_class
             or (
                 definition_type in {"job_config_xml", "multibranch_pipeline"}
                 and not repo_url
-                and not inline_script
+                and not full_inline_script
                 and not script_path
             )
             or (definition_type == "scm_pipeline" and (not repo_url or not script_path))
+            or definition_type == "inline_pipeline"
         )
-        if needs_xml_fallback or xml_edit_enabled:
+        if needs_xml_fallback or job_edit_enabled:
             try:
                 config_xml_text = jenkins_client.get_job_config_xml(job_name)
             except Exception:
@@ -448,8 +652,10 @@ class GetJobDefinitionTool(JenkinsOperationTool):
             repo_url = repo_url or parsed_xml.get("repo_url")
             branch_specs = branch_specs or parsed_xml.get("branch_specs") or []
             script_path = script_path or parsed_xml.get("script_path")
-            inline_script = inline_script or parsed_xml.get("inline_script")
+            full_inline_script = full_inline_script or parsed_xml.get("inline_script")
+            pipeline_style = pipeline_style or parsed_xml.get("pipeline_style")
 
+        inline_script = full_inline_script
         inline_script_truncated = False
         if inline_script and max_inline_script_chars:
             if len(inline_script) > max_inline_script_chars:
@@ -458,15 +664,47 @@ class GetJobDefinitionTool(JenkinsOperationTool):
         elif max_inline_script_chars == 0:
             inline_script = None
 
-        xml_edit_supported = definition_type != "scm_pipeline"
-        local_xml_path = None
+        edit_supported = False
+        edit_mode = None
+        local_edit_path = None
         edit_instructions = None
 
-        if xml_edit_enabled and xml_edit_supported:
+        if definition_type in {"scm_pipeline", "multibranch_pipeline"}:
+            edit_instructions = (
+                "This job is SCM-backed. Modify the Jenkinsfile/script in source "
+                "control at the returned repository/path instead of editing it "
+                "through Jenkins MCP."
+            )
+        elif not job_edit_enabled:
+            edit_instructions = (
+                "Server-side job editing is disabled. To enable it, set "
+                "`settings.enable_job_editing: true` in the MCP config. The older "
+                "`settings.enable_job_xml_editing` alias is still accepted."
+            )
+        elif definition_type == "inline_pipeline" and full_inline_script is not None:
             try:
-                xml_text = config_xml_text or jenkins_client.get_job_config_xml(
-                    job_name
+                script_path_local = _job_inline_script_path(
+                    self.cache_manager,
+                    self.multi_jenkins_manager,
+                    instance_id,
+                    normalized_job,
                 )
+                script_path_local.parent.mkdir(parents=True, exist_ok=True)
+                script_path_local.write_text(full_inline_script, encoding="utf-8")
+                edit_supported = True
+                edit_mode = "inline_pipeline_script"
+                local_edit_path = str(script_path_local)
+                edit_instructions = (
+                    "Inline pipeline script was downloaded locally as Groovy. Modify "
+                    "that file with local patch/edit tools, then call "
+                    "`apply_job_edit` with the same `job_name`, `jenkins_url`, and "
+                    "this `local_edit_path` to validate and upload the updated "
+                    "pipeline definition back to Jenkins."
+                )
+            except Exception as e:
+                edit_instructions = f"Job editing is enabled, but inline script staging failed: {str(e)}"
+        elif config_xml_text:
+            try:
                 xml_path = _job_xml_path(
                     self.cache_manager,
                     self.multi_jenkins_manager,
@@ -474,28 +712,25 @@ class GetJobDefinitionTool(JenkinsOperationTool):
                     normalized_job,
                 )
                 xml_path.parent.mkdir(parents=True, exist_ok=True)
-                xml_path.write_text(xml_text, encoding="utf-8")
-                local_xml_path = str(xml_path)
+                xml_path.write_text(config_xml_text, encoding="utf-8")
+                edit_supported = True
+                edit_mode = "job_config_xml"
+                local_edit_path = str(xml_path)
                 edit_instructions = (
-                    "Jenkins job XML was downloaded locally. Modify that file with "
-                    "local patch/edit tools, then call `apply_job_xml_edit` with "
-                    "the same `job_name`, `jenkins_url`, and this `local_xml_path` "
-                    "to upload the edited config back to Jenkins."
+                    "Jenkins job config XML was downloaded locally. Modify that file "
+                    "with local patch/edit tools, then call `apply_job_edit` with "
+                    "the same `job_name`, `jenkins_url`, and this `local_edit_path` "
+                    "to validate and upload the edited job definition back to "
+                    "Jenkins."
                 )
             except Exception as e:
                 edit_instructions = (
-                    f"XML editing is enabled, but XML download failed: {str(e)}"
+                    f"Job editing is enabled, but XML staging failed: {str(e)}"
                 )
-        elif definition_type == "scm_pipeline":
-            edit_instructions = (
-                "This job is SCM-backed. Modify the Jenkinsfile/script in source "
-                "control at the returned repository/path instead of editing Jenkins "
-                "job XML."
-            )
         else:
             edit_instructions = (
-                "Server-side XML editing is disabled. To enable it, set "
-                "`settings.enable_job_xml_editing: true` in the MCP config."
+                "Job editing is enabled, but this job definition could not be staged "
+                "locally from Jenkins."
             )
 
         return {
@@ -505,6 +740,7 @@ class GetJobDefinitionTool(JenkinsOperationTool):
             "job_type": payload.get("_class"),
             "definition_type": definition_type,
             "definition_class": definition_class or None,
+            "pipeline_style": pipeline_style,
             "description": payload.get("description"),
             "url": payload.get("url"),
             "disabled": payload.get("disabled"),
@@ -515,18 +751,17 @@ class GetJobDefinitionTool(JenkinsOperationTool):
             },
             "inline_script": inline_script,
             "inline_script_truncated": inline_script_truncated,
-            "xml_editing_enabled": xml_edit_enabled,
-            "xml_editing_supported": xml_edit_supported,
-            "local_xml_path": local_xml_path,
-            "edit_upload_tool": (
-                "apply_job_xml_edit" if xml_edit_enabled and local_xml_path else None
-            ),
+            "job_editing_enabled": job_edit_enabled,
+            "edit_supported": edit_supported,
+            "edit_mode": edit_mode,
+            "local_edit_path": local_edit_path,
+            "edit_upload_tool": "apply_job_edit" if local_edit_path else None,
             "edit_instructions": edit_instructions,
         }
 
 
-class ApplyJobXmlEditTool(JenkinsOperationTool):
-    """Upload a locally edited Jenkins job config XML back to Jenkins."""
+class ApplyJobEditTool(JenkinsOperationTool):
+    """Upload a locally edited Jenkins job definition back to Jenkins."""
 
     def __init__(
         self,
@@ -542,14 +777,16 @@ class ApplyJobXmlEditTool(JenkinsOperationTool):
 
     @property
     def name(self) -> str:
-        return "apply_job_xml_edit"
+        return "apply_job_edit"
 
     @property
     def description(self) -> str:
         return (
-            "Uploads a locally edited Jenkins job config XML back to Jenkins. This "
-            "tool is intended for XML files previously downloaded by "
-            "`get_job_definition` when server-side XML editing is enabled."
+            "Uploads a locally edited Jenkins job definition back to Jenkins. This "
+            "tool accepts either a Groovy file previously staged for an inline "
+            "pipeline or a Jenkins config XML file previously staged by "
+            "`get_job_definition`, validates pipeline definitions with Jenkins when "
+            "applicable, and then applies the update."
         )
 
     @property
@@ -558,9 +795,9 @@ class ApplyJobXmlEditTool(JenkinsOperationTool):
             CommonParameters.job_name_param(),
             CommonParameters.jenkins_url_param(),
             ParameterSpec(
-                "local_xml_path",
+                "local_edit_path",
                 str,
-                "Absolute path to the locally edited Jenkins config XML file downloaded by get_job_definition.",
+                "Absolute path to the locally edited Groovy or Jenkins config XML file downloaded by get_job_definition.",
                 required=True,
             ),
         ]
@@ -568,17 +805,19 @@ class ApplyJobXmlEditTool(JenkinsOperationTool):
     def _execute_impl(self, **kwargs) -> Dict[str, Any]:
         job_name = kwargs["job_name"]
         jenkins_url = kwargs["jenkins_url"]
-        local_xml_path = kwargs["local_xml_path"]
+        local_edit_path = kwargs["local_edit_path"]
         normalized_job = JobNameParser.normalize_job_name(job_name)
 
-        if not _xml_editing_enabled(self.multi_jenkins_manager):
+        if not _job_editing_enabled(self.multi_jenkins_manager):
             return {
                 "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
-                "local_xml_path": local_xml_path,
+                "local_edit_path": local_edit_path,
                 "error": (
-                    "Server-side XML editing is disabled. Enable "
-                    "`settings.enable_job_xml_editing: true` to use this tool."
+                    "Server-side job editing is disabled. Enable "
+                    "`settings.enable_job_editing: true` to use this tool. The "
+                    "older `settings.enable_job_xml_editing` alias is also "
+                    "accepted."
                 ),
             }
 
@@ -589,25 +828,25 @@ class ApplyJobXmlEditTool(JenkinsOperationTool):
             return {
                 "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
-                "local_xml_path": local_xml_path,
+                "local_edit_path": local_edit_path,
                 "error": f"Jenkins instance resolution failed: {str(e)}",
                 "instructions": self.get_instance_instructions(),
             }
 
-        workspace_root = _xml_workspace_root(
+        workspace_root = _job_edit_workspace_root(
             self.cache_manager, self.multi_jenkins_manager
         ).resolve()
-        candidate_path = Path(local_xml_path).expanduser().resolve()
+        candidate_path = Path(local_edit_path).expanduser().resolve()
         try:
             candidate_path.relative_to(workspace_root)
         except ValueError:
             return {
                 "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
-                "local_xml_path": local_xml_path,
+                "local_edit_path": local_edit_path,
                 "error": (
-                    "local_xml_path must be inside the configured Jenkins XML "
-                    "workspace directory returned by get_job_definition."
+                    "local_edit_path must be inside the configured Jenkins job "
+                    "edit workspace directory returned by get_job_definition."
                 ),
             }
 
@@ -615,33 +854,145 @@ class ApplyJobXmlEditTool(JenkinsOperationTool):
             return {
                 "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
-                "local_xml_path": local_xml_path,
-                "error": "local_xml_path does not exist.",
+                "local_edit_path": local_edit_path,
+                "error": "local_edit_path does not exist.",
             }
 
-        if candidate_path.suffix.lower() != ".xml":
+        expected_script_path = _job_inline_script_path(
+            self.cache_manager,
+            self.multi_jenkins_manager,
+            instance_id,
+            normalized_job,
+        ).resolve()
+        expected_xml_path = _job_xml_path(
+            self.cache_manager,
+            self.multi_jenkins_manager,
+            instance_id,
+            normalized_job,
+        ).resolve()
+
+        edit_mode = None
+        if candidate_path == expected_script_path:
+            edit_mode = "inline_pipeline_script"
+        elif candidate_path == expected_xml_path:
+            edit_mode = "job_config_xml"
+        else:
             return {
                 "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
-                "local_xml_path": local_xml_path,
-                "error": "local_xml_path must point to an XML file.",
+                "local_edit_path": local_edit_path,
+                "error": (
+                    "local_edit_path does not match the expected staged edit file for "
+                    "this job and Jenkins instance. Re-run get_job_definition for the "
+                    "same job and use the returned local_edit_path exactly."
+                ),
             }
 
         try:
-            xml_text = candidate_path.read_text(encoding="utf-8")
-            jenkins_client.reconfig_job_xml(job_name, xml_text)
+            edited_text = candidate_path.read_text(encoding="utf-8")
         except Exception as e:
             return {
                 "job_name": normalized_job,
                 "jenkins_url": jenkins_url,
-                "local_xml_path": local_xml_path,
-                "error": f"Failed to upload edited Jenkins job XML: {str(e)}",
+                "local_edit_path": local_edit_path,
+                "error": f"Failed to read local edit file: {str(e)}",
+            }
+
+        validation = None
+        xml_to_upload = None
+
+        if edit_mode == "inline_pipeline_script":
+            validation = _validate_pipeline_script(
+                jenkins_client,
+                job_name,
+                edited_text,
+            )
+            if not validation["valid"]:
+                return {
+                    "job_name": normalized_job,
+                    "jenkins_url": jenkins_url,
+                    "local_edit_path": str(candidate_path),
+                    "edit_mode": edit_mode,
+                    "validation": validation,
+                    "error": "Jenkins rejected the edited inline pipeline script.",
+                }
+
+            try:
+                current_xml = jenkins_client.get_job_config_xml(job_name)
+                xml_to_upload = _replace_inline_pipeline_script(
+                    current_xml, edited_text
+                )
+            except Exception as e:
+                return {
+                    "job_name": normalized_job,
+                    "jenkins_url": jenkins_url,
+                    "local_edit_path": str(candidate_path),
+                    "edit_mode": edit_mode,
+                    "error": f"Failed to rebuild Jenkins job XML from the edited script: {str(e)}",
+                }
+        else:
+            try:
+                ET.fromstring(edited_text)
+            except ET.ParseError as e:
+                return {
+                    "job_name": normalized_job,
+                    "jenkins_url": jenkins_url,
+                    "local_edit_path": str(candidate_path),
+                    "edit_mode": edit_mode,
+                    "error": f"Edited Jenkins job XML is not well-formed: {str(e)}",
+                }
+
+            parsed_xml = _parse_job_definition_xml(edited_text)
+            definition_type = parsed_xml.get("definition_type")
+            if definition_type in {"scm_pipeline", "multibranch_pipeline"}:
+                return {
+                    "job_name": normalized_job,
+                    "jenkins_url": jenkins_url,
+                    "local_edit_path": str(candidate_path),
+                    "edit_mode": edit_mode,
+                    "error": (
+                        "SCM-backed Jenkins pipeline definitions must be edited in "
+                        "source control, not uploaded through apply_job_edit."
+                    ),
+                }
+
+            inline_script = parsed_xml.get("inline_script")
+            if inline_script:
+                validation = _validate_pipeline_script(
+                    jenkins_client,
+                    job_name,
+                    inline_script,
+                    pipeline_style=parsed_xml.get("pipeline_style"),
+                )
+                if not validation["valid"]:
+                    return {
+                        "job_name": normalized_job,
+                        "jenkins_url": jenkins_url,
+                        "local_edit_path": str(candidate_path),
+                        "edit_mode": edit_mode,
+                        "validation": validation,
+                        "error": "Jenkins rejected the pipeline definition embedded in the edited job XML.",
+                    }
+
+            xml_to_upload = edited_text
+
+        try:
+            jenkins_client.reconfig_job_xml(job_name, xml_to_upload)
+        except Exception as e:
+            return {
+                "job_name": normalized_job,
+                "jenkins_url": jenkins_url,
+                "local_edit_path": str(candidate_path),
+                "edit_mode": edit_mode,
+                "error": f"Failed to upload edited Jenkins job definition: {str(e)}",
             }
 
         return {
             "job_name": normalized_job,
             "jenkins_url": jenkins_url,
-            "local_xml_path": str(candidate_path),
+            "local_edit_path": str(candidate_path),
+            "edit_mode": edit_mode,
             "updated": True,
-            "message": "Uploaded edited Jenkins job XML back to Jenkins.",
+            "validation": validation,
+            "message": "Validated and uploaded the edited Jenkins job definition back to Jenkins.",
         }

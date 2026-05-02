@@ -1,4 +1,4 @@
-"""Unit tests for ``tools.jobs`` (find_jobs, get_job_definition, apply_job_xml_edit)."""
+"""Unit tests for ``tools.jobs`` (find_jobs, get_job_definition, apply_job_edit)."""
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import requests
 
 from jenkins_mcp_enterprise.tools.jobs import (
-    ApplyJobXmlEditTool,
+    ApplyJobEditTool,
     FindJobsTool,
     GetJobDefinitionTool,
 )
@@ -35,15 +35,20 @@ def _make_jenkins_client(
     job_list=None,
     job_xml: str = "<xml />",
     api_response: MagicMock = None,
+    validation_payload=None,
 ) -> MagicMock:
     session = MagicMock()
     session.get.return_value = (
         api_response if api_response is not None else _make_response()
     )
+    raw_client = MagicMock()
+    raw_client.jenkins_request.return_value = _make_response(
+        json_payload=validation_payload
+    )
 
     client = MagicMock()
     client.config = SimpleNamespace(url=base_url, timeout=timeout)
-    client.connection = SimpleNamespace(session=session)
+    client.connection = SimpleNamespace(session=session, client=raw_client)
     client.list_jobs.return_value = job_list if job_list is not None else []
     client.get_job_config_xml.return_value = job_xml
     client.reconfig_job_xml.return_value = True
@@ -51,10 +56,10 @@ def _make_jenkins_client(
 
 
 def _make_manager(
-    xml_editing_enabled: bool = False, client: MagicMock = None
+    job_editing_enabled: bool = False, client: MagicMock = None
 ) -> MagicMock:
     manager = MagicMock()
-    manager.settings = {"enable_job_xml_editing": xml_editing_enabled}
+    manager.settings = {"enable_job_editing": job_editing_enabled}
     manager.get_usage_instructions.return_value = "configure instances"
     manager.resolve_jenkins_url.return_value = "prod"
     manager.get_jenkins_client.return_value = client
@@ -146,10 +151,12 @@ class TestGetJobDefinitionTool:
             == "git@github.com:example/service-a.git"
         )
         assert data["source_location"]["script_path"] == "ci/Jenkinsfile"
-        assert data["local_xml_path"] is None
+        assert data["local_edit_path"] is None
         assert "source control" in data["edit_instructions"]
 
-    def test_downloads_xml_for_inline_pipeline_when_editing_enabled(self, tmp_path):
+    def test_downloads_inline_script_for_inline_pipeline_when_editing_enabled(
+        self, tmp_path
+    ):
         response = _make_response(
             json_payload={
                 "_class": "org.jenkinsci.plugins.workflow.job.WorkflowJob",
@@ -166,7 +173,7 @@ class TestGetJobDefinitionTool:
                 "</flow-definition>"
             ),
         )
-        manager = _make_manager(xml_editing_enabled=True, client=client)
+        manager = _make_manager(job_editing_enabled=True, client=client)
         tool = GetJobDefinitionTool(
             jenkins_client=client,
             cache_manager=_make_cache_manager(tmp_path),
@@ -182,29 +189,76 @@ class TestGetJobDefinitionTool:
         assert result.success is True
         data = result.data
         assert data["definition_type"] == "inline_pipeline"
+        assert data["pipeline_style"] == "declarative"
         assert data["inline_script_truncated"] is True
-        assert data["local_xml_path"] is not None
-        xml_path = Path(data["local_xml_path"])
-        assert xml_path.exists()
+        assert data["edit_mode"] == "inline_pipeline_script"
+        assert data["local_edit_path"] is not None
+        script_path = Path(data["local_edit_path"])
+        assert script_path.exists()
         assert (
-            xml_path.read_text(encoding="utf-8")
-            == "<flow-definition><definition class=\"org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition\"><script>pipeline { agent any; stages { stage('x') { steps { echo 'hello' } } } }</script></definition></flow-definition>"
+            script_path.read_text(encoding="utf-8")
+            == "pipeline { agent any; stages { stage('x') { steps { echo 'hello' } } } }"
         )
-        assert "apply_job_xml_edit" == data["edit_upload_tool"]
-        assert "downloaded locally" in data["edit_instructions"]
+        assert "apply_job_edit" == data["edit_upload_tool"]
+        assert "Groovy" in data["edit_instructions"]
 
 
-class TestApplyJobXmlEditTool:
+class TestApplyJobEditTool:
+    def test_uploads_local_inline_script_back_to_jenkins(self, tmp_path):
+        workspace_root = tmp_path / "job-definitions"
+        script_path = (
+            workspace_root / "prod" / "team-a" / "inline-pipeline" / "pipeline.groovy"
+        )
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(
+            "pipeline { agent any; stages { stage('x') { steps { echo 'updated' } } } }",
+            encoding="utf-8",
+        )
+
+        client = _make_jenkins_client(
+            validation_payload={"status": "success", "message": ""}
+        )
+        client.get_job_config_xml.return_value = (
+            "<flow-definition>"
+            '<definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition">'
+            "<script>pipeline { agent any; stages { stage('x') { steps { echo 'original' } } } }</script>"
+            "</definition>"
+            "</flow-definition>"
+        )
+        manager = _make_manager(job_editing_enabled=True, client=client)
+        manager.settings["job_edit_workspace_dir"] = str(workspace_root)
+        tool = ApplyJobEditTool(
+            jenkins_client=client,
+            cache_manager=_make_cache_manager(tmp_path),
+            multi_jenkins_manager=manager,
+        )
+
+        result = tool.execute(
+            job_name="team-a/inline-pipeline",
+            jenkins_url="https://jenkins.example.com",
+            local_edit_path=str(script_path),
+        )
+
+        assert result.success is True
+        assert result.data["edit_mode"] == "inline_pipeline_script"
+        assert result.data["updated"] is True
+        client.reconfig_job_xml.assert_called_once_with(
+            "team-a/inline-pipeline",
+            "<flow-definition><definition class=\"org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition\"><script>pipeline { agent any; stages { stage('x') { steps { echo 'updated' } } } }</script></definition></flow-definition>",
+        )
+
     def test_uploads_local_xml_back_to_jenkins(self, tmp_path):
         workspace_root = tmp_path / "job-definitions"
         xml_path = workspace_root / "prod" / "team-a" / "inline-pipeline" / "config.xml"
         xml_path.parent.mkdir(parents=True, exist_ok=True)
-        xml_path.write_text("<flow-definition updated='true' />", encoding="utf-8")
+        xml_path.write_text(
+            "<project><description>updated</description></project>", encoding="utf-8"
+        )
 
         client = _make_jenkins_client()
-        manager = _make_manager(xml_editing_enabled=True, client=client)
-        manager.settings["job_xml_workspace_dir"] = str(workspace_root)
-        tool = ApplyJobXmlEditTool(
+        manager = _make_manager(job_editing_enabled=True, client=client)
+        manager.settings["job_edit_workspace_dir"] = str(workspace_root)
+        tool = ApplyJobEditTool(
             jenkins_client=client,
             cache_manager=_make_cache_manager(tmp_path),
             multi_jenkins_manager=manager,
@@ -213,23 +267,71 @@ class TestApplyJobXmlEditTool:
         result = tool.execute(
             job_name="team-a/inline-pipeline",
             jenkins_url="https://jenkins.example.com",
-            local_xml_path=str(xml_path),
+            local_edit_path=str(xml_path),
         )
 
         assert result.success is True
+        assert result.data["edit_mode"] == "job_config_xml"
         assert result.data["updated"] is True
         client.reconfig_job_xml.assert_called_once_with(
-            "team-a/inline-pipeline", "<flow-definition updated='true' />"
+            "team-a/inline-pipeline",
+            "<project><description>updated</description></project>",
         )
 
-    def test_rejects_xml_path_outside_workspace(self, tmp_path):
+    def test_rejects_invalid_declarative_script_before_upload(self, tmp_path):
+        workspace_root = tmp_path / "job-definitions"
+        script_path = (
+            workspace_root / "prod" / "team-a" / "inline-pipeline" / "pipeline.groovy"
+        )
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(
+            "pipeline { agent any; stages { stage('broken') { steps { echo 'oops' } } }\n",
+            encoding="utf-8",
+        )
+
+        client = _make_jenkins_client(
+            validation_payload={
+                "status": "ok",
+                "data": {
+                    "result": "failure",
+                    "errors": [{"error": "expecting '}', found '' @ line 2"}],
+                },
+            }
+        )
+        client.get_job_config_xml.return_value = (
+            "<flow-definition>"
+            '<definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition">'
+            "<script>pipeline { agent any; stages { stage('x') { steps { echo 'original' } } } }</script>"
+            "</definition>"
+            "</flow-definition>"
+        )
+        manager = _make_manager(job_editing_enabled=True, client=client)
+        manager.settings["job_edit_workspace_dir"] = str(workspace_root)
+        tool = ApplyJobEditTool(
+            jenkins_client=client,
+            cache_manager=_make_cache_manager(tmp_path),
+            multi_jenkins_manager=manager,
+        )
+
+        result = tool.execute(
+            job_name="team-a/inline-pipeline",
+            jenkins_url="https://jenkins.example.com",
+            local_edit_path=str(script_path),
+        )
+
+        assert result.success is True
+        assert result.data["validation"]["valid"] is False
+        assert "rejected" in result.data["error"].lower()
+        client.reconfig_job_xml.assert_not_called()
+
+    def test_rejects_edit_path_outside_workspace(self, tmp_path):
         xml_path = tmp_path / "outside.xml"
         xml_path.write_text("<flow-definition />", encoding="utf-8")
 
         client = _make_jenkins_client()
-        manager = _make_manager(xml_editing_enabled=True, client=client)
-        manager.settings["job_xml_workspace_dir"] = str(tmp_path / "job-definitions")
-        tool = ApplyJobXmlEditTool(
+        manager = _make_manager(job_editing_enabled=True, client=client)
+        manager.settings["job_edit_workspace_dir"] = str(tmp_path / "job-definitions")
+        tool = ApplyJobEditTool(
             jenkins_client=client,
             cache_manager=_make_cache_manager(tmp_path),
             multi_jenkins_manager=manager,
@@ -238,7 +340,7 @@ class TestApplyJobXmlEditTool:
         result = tool.execute(
             job_name="team-a/inline-pipeline",
             jenkins_url="https://jenkins.example.com",
-            local_xml_path=str(xml_path),
+            local_edit_path=str(xml_path),
         )
 
         assert result.success is True
