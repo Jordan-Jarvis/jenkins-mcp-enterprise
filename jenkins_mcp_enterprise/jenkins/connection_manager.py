@@ -48,6 +48,20 @@ class JenkinsConnectionManager:
             self.config.url,
         )
 
+    def refresh_connection(self) -> None:
+        """Recreate the Jenkins client/session after a stale-session style failure."""
+        logger.warning("Refreshing Jenkins connection for %s", self.config.url)
+        self._initialize_connection()
+
+    def should_refresh_on_error(self, error: Exception) -> bool:
+        """Return True when an error suggests the Jenkins client/session is stale."""
+        message = str(error).lower()
+        return (
+            "no valid crumb was included" in message
+            or ("403" in message and "forbidden" in message)
+            or "csrf" in message
+        )
+
     def _validate_connection(self) -> None:
         """Validate that Jenkins is reachable/auth is valid by calling a lightweight API."""
         try:

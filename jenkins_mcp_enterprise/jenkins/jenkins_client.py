@@ -154,6 +154,19 @@ class JenkinsClient:
         """Get job information (compatibility method)"""
         return self.connection.client.get_job_info(job_name)
 
+    def list_jobs(self) -> List[Dict[str, Any]]:
+        """List all jobs visible to the configured Jenkins account."""
+        return self.connection.client.get_all_jobs()
+
+    def get_job_config_xml(self, job_name: str) -> str:
+        """Download the Jenkins job config XML for a job."""
+        return self.connection.client.get_job_config(job_name)
+
+    def reconfig_job_xml(self, job_name: str, config_xml: str) -> bool:
+        """Upload a modified Jenkins job config XML for a job."""
+        self.connection.client.reconfig_job(job_name, config_xml)
+        return True
+
     def get_build_console_output(self, job_name: str, build_number: int) -> str:
         """Get console output as single string (compatibility method)"""
         lines = self.get_console_log(job_name, build_number)

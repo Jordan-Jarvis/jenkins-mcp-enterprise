@@ -213,6 +213,46 @@ class TestListJobBuildsToolExecution:
         tree_arg = client.connection.session.get.call_args.kwargs["params"]["tree"]
         assert tree_arg == f"{custom_tree}{{0,5}}"
 
+    def test_around_build_number_returns_neighbor_window(self):
+        response = _make_response(
+            json_payload={
+                "builds": [
+                    {"number": 12, "result": "SUCCESS"},
+                    {"number": 11, "result": "FAILURE"},
+                    {"number": 10, "result": "SUCCESS"},
+                    {"number": 9, "result": "SUCCESS"},
+                ]
+            }
+        )
+        client = _make_jenkins_client(get_response=response)
+        tool = ListJobBuildsTool(jenkins_client=client)
+
+        result = tool.execute(
+            job_name="my-pipeline",
+            jenkins_url="https://jenkins.example.com",
+            around_build_number=10,
+            before=1,
+            after=1,
+        )
+
+        assert result.success is True
+        assert [build["number"] for build in result.data["builds"]] == [11, 10, 9]
+
+    def test_around_build_number_requires_number_in_tree(self):
+        response = _make_response(json_payload={"builds": []})
+        client = _make_jenkins_client(get_response=response)
+        tool = ListJobBuildsTool(jenkins_client=client)
+
+        result = tool.execute(
+            job_name="my-pipeline",
+            jenkins_url="https://jenkins.example.com",
+            around_build_number=10,
+            tree="builds[result,description]",
+        )
+
+        assert result.success is True
+        assert "requires build numbers" in result.data["error"]
+
     def test_empty_tree_override_falls_back_to_default(self):
         response = _make_response(json_payload={"builds": []})
         client = _make_jenkins_client(get_response=response)
@@ -575,4 +615,4 @@ def test_tools_are_registered_by_tool_factory():
 
     assert "list_job_builds" in tools
     assert "get_build_info" in tools
-    assert factory.get_tool_count() == 11
+    assert factory.get_tool_count() == 13

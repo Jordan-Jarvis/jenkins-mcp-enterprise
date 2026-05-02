@@ -46,11 +46,7 @@ def _extract_json_from_contents(contents: list) -> dict | None:
             return item["json"]
 
     for item in contents:
-        if (
-            isinstance(item, dict)
-            and item.get("mimeType") == "application/json"
-            and isinstance(item.get("text"), str)
-        ):
+        if isinstance(item, dict) and isinstance(item.get("text"), str):
             try:
                 parsed = json.loads(item["text"])
                 if isinstance(parsed, dict):

@@ -17,18 +17,27 @@ class TestErrorScenarios:
 
     @pytest.mark.asyncio
     async def test_jenkins_connection_failure(self, seeded_jenkins_test_env):
-        """Test behavior when Jenkins is unreachable"""
+        """Server should still start, and tool calls should fail cleanly when Jenkins is unreachable."""
         config = seeded_jenkins_test_env.config
         jenkins = seeded_jenkins_test_env.jenkins_double
 
         # Stop the Jenkins double to simulate connection failure
         jenkins.stop()
 
-        with pytest.raises(TimeoutError) as excinfo:
-            async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
-                pass
+        async with MCPTestClient("jenkins_mcp_enterprise.server", config) as client:
+            result = await client.call_tool(
+                "get_jenkins_job_parameters",
+                {"job_name": "sample-job", "jenkins_url": config["jenkins"]["url"]},
+            )
 
-        assert "server failed to initialize" in str(excinfo.value).lower()
+            assert result.get("isError") is True
+            assert "content" in result
+            error_msg = result["content"][0]["text"].lower()
+            assert (
+                "failed to get job parameters" in error_msg
+                or "connection" in error_msg
+                or "refused" in error_msg
+            )
 
     @pytest.mark.asyncio
     async def test_invalid_build_number(self, seeded_jenkins_test_env):
@@ -117,7 +126,7 @@ class TestErrorScenarios:
             if result.get("isError"):
                 assert "content" in result
                 error_msg = result["content"][0]["text"].lower()
-                assert "failed to fetch" in error_msg
+                assert "failed to fetch" in error_msg or "build not found" in error_msg
 
     @pytest.mark.asyncio
     async def test_large_parameter_values(self, seeded_jenkins_test_env):

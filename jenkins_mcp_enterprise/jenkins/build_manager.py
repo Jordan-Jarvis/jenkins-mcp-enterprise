@@ -17,10 +17,43 @@ class BuildManager:
     def __init__(self, connection_manager: JenkinsConnectionManager):
         self.connection = connection_manager
 
+    def _call_client(self, operation_name: str, callback):
+        """Execute a Jenkins client operation, refreshing the client once if stale."""
+        try:
+            return callback(self.connection.client)
+        except Exception as e:
+            should_refresh = getattr(
+                self.connection, "should_refresh_on_error", lambda _error: False
+            )
+            if should_refresh(e):
+                logger.warning(
+                    "%s failed with a stale Jenkins session error; refreshing connection and retrying once: %s",
+                    operation_name,
+                    e,
+                )
+                self.connection.refresh_connection()
+                return callback(self.connection.client)
+            raise
+
+    def _is_missing_queue_item_error(self, error: Exception) -> bool:
+        """Return True when Jenkins no longer exposes the queue item."""
+        error_type = type(error).__name__.lower()
+        message = str(error).lower()
+        return (
+            "notfound" in error_type
+            or "404" in message
+            or "not found" in message
+            or "does not exist" in message
+            or "queue number" in message
+        )
+
     def get_next_build_number(self, job_name: str) -> int:
         """Get the next build number for a job"""
         try:
-            job_info = self.connection.client.get_job_info(job_name)
+            job_info = self._call_client(
+                f"Get next build number for {job_name}",
+                lambda client: client.get_job_info(job_name),
+            )
             return job_info["nextBuildNumber"]
         except Exception as e:
             raise JenkinsConnectionError(
@@ -42,8 +75,9 @@ class BuildManager:
             if token is not None:
                 build_kwargs["token"] = token
 
-            queue_item_number = self.connection.client.build_job(
-                job_name, **build_kwargs
+            queue_item_number = self._call_client(
+                f"Trigger build for {job_name}",
+                lambda client: client.build_job(job_name, **build_kwargs),
             )
 
             if not queue_item_number:
@@ -75,7 +109,10 @@ class BuildManager:
 
         while time.time() - start_time < timeout:
             try:
-                queue_item = self.connection.client.get_queue_item(queue_item_number)
+                queue_item = self._call_client(
+                    f"Poll queue item {queue_item_number} for {job_name}",
+                    lambda client: client.get_queue_item(queue_item_number),
+                )
 
                 if "executable" in queue_item and queue_item["executable"]:
                     build_number = queue_item["executable"]["number"]
@@ -85,7 +122,7 @@ class BuildManager:
                 time.sleep(2)
 
             except Exception as e:
-                if "NotFoundException" in str(type(e)):
+                if self._is_missing_queue_item_error(e):
                     # Queue item disappeared, try to find the build
                     return self._find_recent_build(job_name)
                 else:
@@ -101,7 +138,10 @@ class BuildManager:
     def _find_recent_build(self, job_name: str) -> int:
         """Find the most recent build for a job"""
         try:
-            job_info = self.connection.client.get_job_info(job_name)
+            job_info = self._call_client(
+                f"Find recent build for {job_name}",
+                lambda client: client.get_job_info(job_name),
+            )
             if job_info["lastBuild"]:
                 return job_info["lastBuild"]["number"]
             else:
@@ -114,8 +154,11 @@ class BuildManager:
     def get_build_info(self, job_name: str, build_number: int, depth: int = 1) -> Build:
         """Get information about a specific build"""
         try:
-            build_info = self.connection.client.get_build_info(
-                job_name, build_number, depth=depth
+            build_info = self._call_client(
+                f"Get build info for {job_name}#{build_number}",
+                lambda client: client.get_build_info(
+                    job_name, build_number, depth=depth
+                ),
             )
 
             # Determine status from build info
@@ -176,7 +219,10 @@ class BuildManager:
     def get_job_parameters(self, job_name: str) -> List[Dict[str, Any]]:
         """Get parameters definition for a job"""
         try:
-            job_info = self.connection.client.get_job_info(job_name)
+            job_info = self._call_client(
+                f"Get job parameters for {job_name}",
+                lambda client: client.get_job_info(job_name),
+            )
             parameters = []
 
             for action in job_info.get("actions", []):
@@ -203,7 +249,10 @@ class BuildManager:
     def cancel_build(self, job_name: str, build_number: int) -> bool:
         """Cancel a running build"""
         try:
-            self.connection.client.stop_build(job_name, build_number)
+            self._call_client(
+                f"Cancel build {job_name}#{build_number}",
+                lambda client: client.stop_build(job_name, build_number),
+            )
             logger.info(f"Cancelled build {job_name}#{build_number}")
             return True
         except Exception as e:

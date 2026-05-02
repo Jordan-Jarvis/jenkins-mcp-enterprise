@@ -76,6 +76,7 @@ class QdrantVectorManager:
                 host=self._extract_host(config.host),
                 port=self._extract_port(config.host),
                 timeout=30,
+                check_compatibility=False,
             )
             logger.info(f"Connected to Qdrant at {config.host}")
         except Exception as e:
@@ -85,7 +86,10 @@ class QdrantVectorManager:
         # Load embedding model
         try:
             self.model = SentenceTransformer(config.embedding_model)
-            self.embedding_dim = self.model.get_sentence_embedding_dimension()
+            if hasattr(self.model, "get_embedding_dimension"):
+                self.embedding_dim = self.model.get_embedding_dimension()
+            else:
+                self.embedding_dim = self.model.get_sentence_embedding_dimension()
             logger.info(
                 f"Loaded embedding model {config.embedding_model} with dimension {self.embedding_dim}"
             )

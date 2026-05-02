@@ -16,11 +16,13 @@ from typing import Dict
 from .base import Tool
 from .di_container import DIContainer
 from .tools.diagnostics import DiagnoseBuildFailureTool
+from .tools.jobs import ApplyJobXmlEditTool, FindJobsTool, GetJobDefinitionTool
 from .tools.jenkins_tools import GetJobParametersTool
 from .tools.logs import FilterErrorsTool, LogContextTool
 from .tools.ripgrep_tool import NavigateLogTool, RipgrepSearchTool
 from .tools.search import SemanticSearchTool
 from .tools.subbuilds import SubBuildTraversalTool
+from .tools.builds import GetBuildInfoTool, ListJobBuildsTool
 
 # Import all tool classes
 from .tools.trigger import AsyncBuildTool, TriggerBuildTool
@@ -77,6 +79,21 @@ class ToolFactory:
         )
         tools[get_params_tool.name] = get_params_tool
 
+        find_jobs_tool = FindJobsTool(
+            jenkins_client=jenkins_client, multi_jenkins_manager=multi_jenkins_manager
+        )
+        tools[find_jobs_tool.name] = find_jobs_tool
+
+        list_builds_tool = ListJobBuildsTool(
+            jenkins_client=jenkins_client, multi_jenkins_manager=multi_jenkins_manager
+        )
+        tools[list_builds_tool.name] = list_builds_tool
+
+        get_build_info_tool = GetBuildInfoTool(
+            jenkins_client=jenkins_client, multi_jenkins_manager=multi_jenkins_manager
+        )
+        tools[get_build_info_tool.name] = get_build_info_tool
+
         # Tools requiring JenkinsClient and CacheManager (now with multi-instance support)
         async_tool = AsyncBuildTool(
             jenkins_client=jenkins_client,
@@ -120,6 +137,25 @@ class ToolFactory:
             multi_jenkins_manager=multi_jenkins_manager,
         )
         tools[navigate_tool.name] = navigate_tool
+
+        get_job_definition_tool = GetJobDefinitionTool(
+            jenkins_client=jenkins_client,
+            cache_manager=cache_manager,
+            multi_jenkins_manager=multi_jenkins_manager,
+        )
+        tools[get_job_definition_tool.name] = get_job_definition_tool
+
+        if bool(
+            getattr(multi_jenkins_manager, "settings", {}).get(
+                "enable_job_xml_editing", False
+            )
+        ):
+            apply_job_xml_edit_tool = ApplyJobXmlEditTool(
+                jenkins_client=jenkins_client,
+                cache_manager=cache_manager,
+                multi_jenkins_manager=multi_jenkins_manager,
+            )
+            tools[apply_job_xml_edit_tool.name] = apply_job_xml_edit_tool
 
         # Tools requiring JenkinsClient, CacheManager, and VectorManager (now with multi-instance support)
         if not getattr(vector_manager, "vector_search_disabled", False):
@@ -172,8 +208,15 @@ class ToolFactory:
         Returns:
             The number of tools this factory creates
         """
-        count = 9
+        count = 13
         vector_manager = self.container.get_vector_manager()
         if not getattr(vector_manager, "vector_search_disabled", False):
+            count += 1
+        multi_jenkins_manager = self.container.get_multi_jenkins_manager()
+        if bool(
+            getattr(multi_jenkins_manager, "settings", {}).get(
+                "enable_job_xml_editing", False
+            )
+        ):
             count += 1
         return count

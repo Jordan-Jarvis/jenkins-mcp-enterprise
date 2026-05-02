@@ -46,11 +46,13 @@ class TestToolScenarios:
             expected_tools = [
                 "trigger_build",
                 "trigger_build_async",
+                "find_jobs",
                 "get_log_context",
                 "filter_errors_grep",
                 "trigger_build_with_subs",
                 "diagnose_build_failure",
                 "get_jenkins_job_parameters",
+                "get_job_definition",
             ]
 
             for expected in expected_tools:

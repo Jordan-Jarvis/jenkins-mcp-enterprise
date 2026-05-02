@@ -66,6 +66,47 @@ def create_server(
 def register_jenkins_resources(mcp: FastMCP, multi_jenkins_manager) -> None:
     """Register MCP resources for Jenkins URL to credentials mapping"""
 
+    @mcp.resource("jenkins://instances")
+    def jenkins_instances() -> dict:
+        """Lists configured Jenkins instances without leaking credentials."""
+        instances = []
+        for instance_id, config in multi_jenkins_manager.instances_config.items():
+            instances.append(
+                {
+                    "id": instance_id,
+                    "uri": f"jenkins://instances/{instance_id}",
+                    "url": config.url,
+                    "display_name": config.display_name or instance_id,
+                    "description": config.description or f"Jenkins instance: {config.url}",
+                    "has_credentials": bool(config.token),
+                }
+            )
+        return {
+            "instances": instances,
+            "total": len(instances),
+            "usage": "Use the per-instance resource URI for metadata or pass jenkins_url to tools.",
+        }
+
+    @mcp.resource("jenkins://instances/{instance_id}")
+    def jenkins_instance(instance_id: str) -> dict:
+        """Returns metadata for a single configured Jenkins instance."""
+        config = multi_jenkins_manager.instances_config.get(instance_id)
+        if not config:
+            return {
+                "instance_id": instance_id,
+                "status": "not_configured",
+                "message": f"No Jenkins instance configured for key '{instance_id}'",
+            }
+        return {
+            "instance_id": instance_id,
+            "status": "configured",
+            "uri": f"jenkins://instances/{instance_id}",
+            "url": config.url,
+            "display_name": config.display_name or instance_id,
+            "description": config.description or f"Jenkins instance: {config.url}",
+            "has_credentials": bool(config.token),
+        }
+
     @mcp.resource("jenkins://info")
     def jenkins_instances_info() -> dict:
         """Lists all available Jenkins instances with their URLs and descriptions"""
