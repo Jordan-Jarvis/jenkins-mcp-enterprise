@@ -150,13 +150,16 @@ def _parse_job_definition_xml(xml_text: str) -> Dict[str, Any]:
         remote_urls = [
             text
             for text in (
-                _xml_text(node) for node in definition.findall(".//userRemoteConfigs/*/url")
+                _xml_text(node)
+                for node in definition.findall(".//userRemoteConfigs/*/url")
             )
             if text
         ]
         branch_specs = [
             text
-            for text in (_xml_text(node) for node in definition.findall(".//branches/*/name"))
+            for text in (
+                _xml_text(node) for node in definition.findall(".//branches/*/name")
+            )
             if text
         ]
         result["repo_url"] = remote_urls[0] if remote_urls else None
@@ -399,8 +402,12 @@ class GetJobDefinitionTool(JenkinsOperationTool):
         scm_data = definition.get("scm") if isinstance(definition, dict) else None
         repo_url = _extract_repo_url(scm_data)
         branch_specs = _extract_branch_specs(scm_data)
-        script_path = definition.get("scriptPath") if isinstance(definition, dict) else None
-        inline_script = definition.get("script") if isinstance(definition, dict) else None
+        script_path = (
+            definition.get("scriptPath") if isinstance(definition, dict) else None
+        )
+        inline_script = (
+            definition.get("script") if isinstance(definition, dict) else None
+        )
 
         definition_type = "job_config_xml"
         if "CpsScmFlowDefinition" in definition_class:
@@ -426,10 +433,7 @@ class GetJobDefinitionTool(JenkinsOperationTool):
                 and not inline_script
                 and not script_path
             )
-            or (
-                definition_type == "scm_pipeline"
-                and (not repo_url or not script_path)
-            )
+            or (definition_type == "scm_pipeline" and (not repo_url or not script_path))
         )
         if needs_xml_fallback or xml_edit_enabled:
             try:
@@ -460,7 +464,9 @@ class GetJobDefinitionTool(JenkinsOperationTool):
 
         if xml_edit_enabled and xml_edit_supported:
             try:
-                xml_text = config_xml_text or jenkins_client.get_job_config_xml(job_name)
+                xml_text = config_xml_text or jenkins_client.get_job_config_xml(
+                    job_name
+                )
                 xml_path = _job_xml_path(
                     self.cache_manager,
                     self.multi_jenkins_manager,
@@ -477,7 +483,9 @@ class GetJobDefinitionTool(JenkinsOperationTool):
                     "to upload the edited config back to Jenkins."
                 )
             except Exception as e:
-                edit_instructions = f"XML editing is enabled, but XML download failed: {str(e)}"
+                edit_instructions = (
+                    f"XML editing is enabled, but XML download failed: {str(e)}"
+                )
         elif definition_type == "scm_pipeline":
             edit_instructions = (
                 "This job is SCM-backed. Modify the Jenkinsfile/script in source "

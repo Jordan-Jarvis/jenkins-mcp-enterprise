@@ -62,7 +62,9 @@ class TestSimpleValidation:
         from jenkins_mcp_enterprise.tool_validator import validate_all_tools
 
         if not os.getenv("JENKINS_URL") or not os.getenv("JENKINS_TOKEN"):
-            pytest.skip("Real Jenkins validation requires JENKINS_URL and JENKINS_TOKEN")
+            pytest.skip(
+                "Real Jenkins validation requires JENKINS_URL and JENKINS_TOKEN"
+            )
 
         # Run with real Jenkins
         success = validate_all_tools(use_real_jenkins=True)

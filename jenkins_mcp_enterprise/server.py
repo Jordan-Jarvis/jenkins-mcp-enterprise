@@ -77,7 +77,8 @@ def register_jenkins_resources(mcp: FastMCP, multi_jenkins_manager) -> None:
                     "uri": f"jenkins://instances/{instance_id}",
                     "url": config.url,
                     "display_name": config.display_name or instance_id,
-                    "description": config.description or f"Jenkins instance: {config.url}",
+                    "description": config.description
+                    or f"Jenkins instance: {config.url}",
                     "has_credentials": bool(config.token),
                 }
             )

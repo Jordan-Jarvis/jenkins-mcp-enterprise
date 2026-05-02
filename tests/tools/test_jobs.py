@@ -37,7 +37,9 @@ def _make_jenkins_client(
     api_response: MagicMock = None,
 ) -> MagicMock:
     session = MagicMock()
-    session.get.return_value = api_response if api_response is not None else _make_response()
+    session.get.return_value = (
+        api_response if api_response is not None else _make_response()
+    )
 
     client = MagicMock()
     client.config = SimpleNamespace(url=base_url, timeout=timeout)
@@ -139,7 +141,10 @@ class TestGetJobDefinitionTool:
         assert result.success is True
         data = result.data
         assert data["definition_type"] == "scm_pipeline"
-        assert data["source_location"]["repo_url"] == "git@github.com:example/service-a.git"
+        assert (
+            data["source_location"]["repo_url"]
+            == "git@github.com:example/service-a.git"
+        )
         assert data["source_location"]["script_path"] == "ci/Jenkinsfile"
         assert data["local_xml_path"] is None
         assert "source control" in data["edit_instructions"]
@@ -155,7 +160,7 @@ class TestGetJobDefinitionTool:
             api_response=response,
             job_xml=(
                 "<flow-definition>"
-                "<definition class=\"org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition\">"
+                '<definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition">'
                 "<script>pipeline { agent any; stages { stage('x') { steps { echo 'hello' } } } }</script>"
                 "</definition>"
                 "</flow-definition>"
