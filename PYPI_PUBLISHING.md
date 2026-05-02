@@ -102,7 +102,7 @@ Your package includes:
 
 Update version in `pyproject.toml`:
 ```toml
-version = "1.0.1"  # Increment for each release
+version = "1.0.2"  # Increment for each release
 ```
 
 Version format: `MAJOR.MINOR.PATCH`
