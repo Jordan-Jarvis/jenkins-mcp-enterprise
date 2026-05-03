@@ -1,17 +1,17 @@
 # PyPI Publishing Guide
 
-This document explains how to publish the Jenkins MCP Server to PyPI so users can install it with `pip install jenkins_mcp_enterprise-enterprise`.
+This document explains how to publish the Jenkins MCP Server to PyPI so users can install it with `pip install jenkins-mcp-enterprise`.
 
 ## 🚀 Quick Overview
 
 Users will be able to install your package with:
 ```bash
-pip install jenkins_mcp_enterprise-enterprise
+pip install jenkins-mcp-enterprise
 ```
 
 And run it with:
 ```bash
-jenkins_mcp_enterprise-enterprise --config config/mcp-config.yml
+jenkins_mcp_enterprise --config config/mcp-config.yml
 ```
 
 ## 📋 Setup Requirements
@@ -28,9 +28,9 @@ jenkins_mcp_enterprise-enterprise --config config/mcp-config.yml
 1. Go to https://pypi.org/manage/account/publishing/
 2. Click "Add a new pending publisher"
 3. Fill in:
-   - **PyPI Project Name**: `jenkins_mcp_enterprise-enterprise`
+   - **PyPI Project Name**: `jenkins-mcp-enterprise`
    - **Owner**: `Jordan-Jarvis`
-   - **Repository name**: `jenkins_mcp_enterprise`
+   - **Repository name**: `jenkins-mcp-enterprise`
    - **Workflow filename**: `publish.yml`
    - **Environment name**: `pypi`
 
@@ -94,7 +94,7 @@ twine upload --repository testpypi dist/*
 
 Your package includes:
 - **Main module**: `jenkins_mcp_enterprise/`
-- **Entry point**: `jenkins_mcp_enterprise-enterprise` command
+- **Entry point**: `jenkins_mcp_enterprise` command
 - **Dependencies**: All required packages for Jenkins, MCP, AI features
 - **Diagnostic config**: Bundled diagnostic parameters
 
@@ -102,7 +102,7 @@ Your package includes:
 
 Update version in `pyproject.toml`:
 ```toml
-version = "1.0.2"  # Increment for each release
+version = "1.0.3"  # Increment for each release
 ```
 
 Version format: `MAJOR.MINOR.PATCH`
@@ -113,7 +113,7 @@ Version format: `MAJOR.MINOR.PATCH`
 ## ⚠️ Important Notes
 
 1. **Email in pyproject.toml**: Update `your.email@domain.com` to your real email
-2. **Package name**: `jenkins_mcp_enterprise-enterprise` is reserved once published
+2. **Package name**: `jenkins-mcp-enterprise` is reserved once published
 3. **GPL v3 License**: Make sure you're comfortable with GPL v3 requirements
 4. **Dependencies**: Heavy dependencies (sentence-transformers, qdrant-client) will increase install time
 
@@ -137,13 +137,13 @@ Version format: `MAJOR.MINOR.PATCH`
 
 1. **Verify installation**:
    ```bash
-   pip install jenkins_mcp_enterprise-enterprise
-   jenkins_mcp_enterprise-enterprise --help
+   pip install jenkins-mcp-enterprise
+   jenkins_mcp_enterprise --help
    ```
 
 2. **Update README** with pip install instructions
 
-3. **Monitor PyPI page**: https://pypi.org/project/jenkins_mcp_enterprise-enterprise/
+3. **Monitor PyPI page**: https://pypi.org/project/jenkins-mcp-enterprise/
 
 4. **Track downloads**: PyPI provides download statistics
 
