@@ -3,32 +3,6 @@
 import os
 from typing import Any, Dict, List, Optional
 
-try:
-    from qdrant_client import QdrantClient
-    from qdrant_client.models import (
-        Distance,
-        FieldCondition,
-        Filter,
-        MatchValue,
-        PointStruct,
-        Range,
-        VectorParams,
-    )
-except ImportError:
-    QdrantClient = None
-    Distance = None
-    FieldCondition = None
-    Filter = None
-    MatchValue = None
-    PointStruct = None
-    Range = None
-    VectorParams = None
-
-try:
-    from sentence_transformers import SentenceTransformer
-except ImportError:
-    SentenceTransformer = None
-
 from .base import Build, VectorChunk
 from .config import VectorConfig
 from .exceptions import VectorStoreError
@@ -36,6 +10,64 @@ from .logging_config import get_component_logger
 from .streaming.log_processor import LogChunk, StreamingLogProcessor
 
 logger = get_component_logger("vector_manager")
+
+# qdrant_client/sentence_transformers (the latter pulls in torch) are only
+# imported lazily by _import_vector_deps(), called from __init__ after the
+# disabled check — importing torch is a heavy, disk-I/O-costly operation that
+# should not happen at all when vector search is disabled.
+QdrantClient = None
+Distance = None
+FieldCondition = None
+Filter = None
+MatchValue = None
+PointStruct = None
+Range = None
+VectorParams = None
+SentenceTransformer = None
+
+
+def _import_vector_deps() -> None:
+    """Import qdrant_client/sentence_transformers on first actual need.
+
+    Deferred so that constructing a QdrantVectorManager with vector search
+    disabled (config or env var) never pays the cost of importing torch
+    (via sentence_transformers), which is large enough to be a meaningful
+    source of disk I/O on every process start.
+    """
+    global QdrantClient, Distance, FieldCondition, Filter, MatchValue, PointStruct, Range, VectorParams, SentenceTransformer
+
+    if QdrantClient is not None or SentenceTransformer is not None:
+        return  # already imported
+
+    try:
+        from qdrant_client import QdrantClient as _QdrantClient
+        from qdrant_client.models import (
+            Distance as _Distance,
+            FieldCondition as _FieldCondition,
+            Filter as _Filter,
+            MatchValue as _MatchValue,
+            PointStruct as _PointStruct,
+            Range as _Range,
+            VectorParams as _VectorParams,
+        )
+
+        QdrantClient = _QdrantClient
+        Distance = _Distance
+        FieldCondition = _FieldCondition
+        Filter = _Filter
+        MatchValue = _MatchValue
+        PointStruct = _PointStruct
+        Range = _Range
+        VectorParams = _VectorParams
+    except ImportError:
+        pass
+
+    try:
+        from sentence_transformers import SentenceTransformer as _SentenceTransformer
+
+        SentenceTransformer = _SentenceTransformer
+    except ImportError:
+        pass
 
 
 class QdrantVectorManager:
@@ -46,15 +78,18 @@ class QdrantVectorManager:
         self.cache_manager = cache_manager
         self.jenkins_client = jenkins_client
 
-        # Check if vector search is disabled via environment variable
-        self.vector_search_disabled = os.getenv(
-            "DISABLE_VECTOR_SEARCH", ""
-        ).lower() in ("true", "1", "yes")
+        # Vector search can be disabled via the `disable_vector_search` config
+        # field (e.g. set from YAML) or the DISABLE_VECTOR_SEARCH env var;
+        # either one disables it.
+        env_disabled = os.getenv("DISABLE_VECTOR_SEARCH", "").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+        self.vector_search_disabled = config.disable_vector_search or env_disabled
 
         if self.vector_search_disabled:
-            logger.warning(
-                "Vector search functionality is DISABLED via environment variable"
-            )
+            logger.warning("Vector search functionality is DISABLED")
             logger.info(
                 "Initialized in mock mode. No Qdrant or SentenceTransformer will be loaded"
             )
@@ -63,6 +98,8 @@ class QdrantVectorManager:
             self.embedding_dim = 384  # Default dimension
             self.collection_name = config.collection_name
             return
+
+        _import_vector_deps()
 
         if QdrantClient is None or SentenceTransformer is None:
             raise VectorStoreError(

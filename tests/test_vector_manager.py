@@ -3,11 +3,20 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from jenkins_mcp_enterprise.base import Build
+from jenkins_mcp_enterprise.config import VectorConfig
 from jenkins_mcp_enterprise.streaming.log_processor import LogChunk
-from jenkins_mcp_enterprise.vector_manager import QdrantVectorManager
+from jenkins_mcp_enterprise.vector_manager import (
+    QdrantVectorManager,
+    _import_vector_deps,
+)
 
 
 def test_search_hierarchical_uses_query_points_and_preserves_payload():
+    # This test builds a manager via __new__ (bypassing __init__), so the
+    # qdrant_client.models types (FieldCondition, MatchValue, ...) that
+    # search_hierarchical() uses need to be imported explicitly here — in
+    # real usage __init__ always imports them before self.client is set.
+    _import_vector_deps()
     manager = QdrantVectorManager.__new__(QdrantVectorManager)
     manager.vector_search_disabled = False
     manager.collection_name = "test-collection"
@@ -81,3 +90,26 @@ def test_index_build_log_processes_stream_and_upserts(monkeypatch, tmp_path):
     manager.index_build_log(build, Path(log_path))
 
     manager.upsert_hierarchical_chunks.assert_called_once_with([chunk], build, depth=0)
+
+
+def test_disable_vector_search_via_config_skips_qdrant_and_model(monkeypatch):
+    monkeypatch.delenv("DISABLE_VECTOR_SEARCH", raising=False)
+    config = VectorConfig(disable_vector_search=True)
+
+    manager = QdrantVectorManager(config, cache_manager=None, jenkins_client=None)
+
+    assert manager.vector_search_disabled is True
+    assert manager.client is None
+    assert manager.model is None
+    assert manager.collection_name == config.collection_name
+
+
+def test_disable_vector_search_via_env_var_still_works(monkeypatch):
+    monkeypatch.setenv("DISABLE_VECTOR_SEARCH", "true")
+    config = VectorConfig()  # disable_vector_search defaults to False
+
+    manager = QdrantVectorManager(config, cache_manager=None, jenkins_client=None)
+
+    assert manager.vector_search_disabled is True
+    assert manager.client is None
+    assert manager.model is None
