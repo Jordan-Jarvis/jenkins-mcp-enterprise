@@ -60,6 +60,7 @@ class VectorConfig:
     chunk_overlap: int = 5
     top_k_default: int = 5
     timeout: int = 30
+    disable_vector_search: bool = False
 
     def __post_init__(self):
         if not self.host.startswith(("http://", "https://")):

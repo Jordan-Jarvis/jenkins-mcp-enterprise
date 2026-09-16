@@ -287,6 +287,7 @@ def load_config_from_yaml(config_path: str) -> MCPConfig:
         chunk_overlap=vector_data.get("chunk_overlap", 5),
         top_k_default=vector_data.get("top_k_default", 5),
         timeout=vector_data.get("timeout", 30),
+        disable_vector_search=vector_data.get("disable_vector_search", False),
     )
 
     cache_data = config_data.get("cache", {})
