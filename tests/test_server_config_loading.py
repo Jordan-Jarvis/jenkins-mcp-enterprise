@@ -67,3 +67,24 @@ def test_create_server_falls_back_to_default_logging_without_config(monkeypatch)
     server_mod.create_server(config=None, config_file_path=None)
 
     assert calls == [((), {})]
+
+
+def test_module_import_does_not_lock_in_default_logging_handlers():
+    """Regression test: importing jenkins_mcp_enterprise.logging_config (or
+    anything that transitively imports it, e.g. server.py) must not itself
+    attach handlers to the 'jenkins_mcp' logger — otherwise setup_logging()'s
+    own already-configured guard makes create_server()'s later, real call
+    (with the actual configured log_level/log_file) a silent no-op."""
+    import logging
+
+    jenkins_logger = logging.getLogger("jenkins_mcp")
+    for handler in list(jenkins_logger.handlers):
+        jenkins_logger.removeHandler(handler)
+
+    import importlib
+
+    import jenkins_mcp_enterprise.logging_config as logging_config_mod
+
+    importlib.reload(logging_config_mod)
+
+    assert jenkins_logger.handlers == []
