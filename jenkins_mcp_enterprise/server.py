@@ -39,8 +39,14 @@ def create_server(
     port: int = 8000,
 ) -> FastMCP:
     """Create and configure the MCP server"""
-    # Setup logging
-    setup_logging()
+    # Setup logging using the loaded config's settings when available, so
+    # server.log_level/server.log_file (e.g. from --config YAML) actually
+    # take effect instead of always falling back to setup_logging()'s
+    # hardcoded defaults.
+    if config is not None:
+        setup_logging(config.server.log_level, config.server.log_file)
+    else:
+        setup_logging()
 
     # Initialize dependencies
     container = DIContainer(config, config_file_path)
