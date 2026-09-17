@@ -91,8 +91,14 @@ def get_component_logger(component_name: str) -> logging.Logger:
     return logging.getLogger(f"jenkins_mcp.{component_name}")
 
 
-# Create module-level logger with default configuration
-logger = setup_logging()
+# NOTE: intentionally NOT calling setup_logging() here. setup_logging()
+# only attaches handlers once (it returns early if the logger already has
+# any), so an eager call at import time — before create_server() has a
+# chance to apply the real configured log_level/log_file — would silently
+# lock in the defaults and make any later, properly-configured call a no-op.
+# Handlers get attached by the first real call to setup_logging(), from
+# create_server().
+logger = logging.getLogger("jenkins_mcp")
 
 
 def configure_logging_from_env() -> logging.Logger:
