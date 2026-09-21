@@ -39,9 +39,6 @@ RUN if [ "$INSTALL_VECTOR_DEPS" = "true" ]; then \
 
 # Sanity check: ensure the MCP SDK is importable (prevents runtime failures like "No module named 'mcp'")
 RUN python3 -c "import mcp; from mcp.server.fastmcp import FastMCP; print('✅ MCP SDK import OK')"
-# Copy configuration
-COPY config/ ./config/
-
 # Create cache directory
 RUN mkdir -p /tmp/mcp-jenkins
 
@@ -49,6 +46,6 @@ RUN mkdir -p /tmp/mcp-jenkins
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD python3 -c "from jenkins_mcp_enterprise.multi_jenkins_manager import MultiJenkinsManager; m = MultiJenkinsManager(); print('OK')" || exit 1
 
-# Run the MCP server in HTTP mode (no proxy needed)  
-EXPOSE 8000
-CMD ["python3", "-m","jenkins_mcp_enterprise.server", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000", "--config", "/app/config/mcp-config.yml"]
+# Default to stdio transport for safer local/compose usage.
+# For HTTP transport, override command in a dedicated/protected deployment profile.
+CMD ["python3", "-m","jenkins_mcp_enterprise.server", "--transport", "stdio", "--config", "/app/config/mcp-config.yml"]

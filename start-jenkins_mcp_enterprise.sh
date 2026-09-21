@@ -65,19 +65,10 @@ if "${DOCKER_COMPOSE[@]}" -f "$COMPOSE_FILE" config --services | grep -qx "qdran
     }
 fi
 
-# Wait for server health endpoint (provided by FastMCP custom route)
-echo "   Waiting for MCP server..."
-timeout 60 bash -c 'until curl -sf http://localhost:8000/health > /dev/null; do sleep 2; done' || {
-    echo "❌ MCP server failed to start"
-    "${DOCKER_COMPOSE[@]}" -f "$COMPOSE_FILE" logs jenkins_mcp_enterprise-server
-    exit 1
-}
-
 echo "✅ Services started successfully!"
 echo ""
 echo "🌐 Access points:"
-echo "   - MCP Server (streamable HTTP): http://localhost:8000/mcp"
-echo "   - MCP Server health: http://localhost:8000/health"
+echo "   - MCP Server: stdio transport inside container (no host HTTP port exposed by default)"
 echo "   - Qdrant Dashboard: http://localhost:6333/dashboard"
 echo "📊 Service Status:"
 "${DOCKER_COMPOSE[@]}" -f "$COMPOSE_FILE" ps
